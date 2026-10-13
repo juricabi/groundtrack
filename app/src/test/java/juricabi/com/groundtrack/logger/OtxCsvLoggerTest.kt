@@ -63,6 +63,27 @@ class OtxCsvLoggerTest {
     }
 
     @Test
+    fun aRowIsWrittenInTheUnitsEdgeTxLogs() {
+        val name = "units"
+        csv(name).delete()
+        val logger = OtxCsvLogger(name, append = false, bytesRecorded = { 1L })
+        logger.onAntData(2)
+        logger.onPowerData(250)
+        logger.onPitchData(90f)
+        logger.onRollData(-45f)
+        assertTrue(logger.outputData())
+        logger.onDisconnected()
+
+        val (header, row) = csv(name).readLines().map { it.split(",") }
+        val column = header.zip(row).toMap()
+        assertTrue(header.containsAll(listOf("1RSS(dBm)", "2RSS(dBm)", "TRSS(dBm)")))
+        assertEquals("2", column["ANT"])
+        assertEquals("250", column["TPWR(mW)"])
+        assertEquals("1.571", column["Ptch(rad)"])
+        assertEquals("-0.785", column["Roll(rad)"])
+    }
+
+    @Test
     fun aLogWhoseLinkRecordedNothingIsSweptOnClose() {
         // The .tlm beside it stayed at zero bytes — nothing came off the link,
         // only the header and the timer's empty rows reached the CSV. It is

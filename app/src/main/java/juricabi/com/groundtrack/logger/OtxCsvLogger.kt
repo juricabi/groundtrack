@@ -30,14 +30,14 @@ class OtxCsvLogger(
         "Date",
         "Time",
         "RSSI(dB)",
-        "1RSS(dB)",
-        "2RSS(dB)",
+        "1RSS(dBm)",
+        "2RSS(dBm)",
         "RQly(%)",
         "RSNR(dB)",
         "ANT",
         "RFMD",
         "TPWR(mW)",
-        "TRSS(dB)", // Downlink - signal strength
+        "TRSS(dBm)", // Downlink - signal strength
         "TQly(%)",
         "TSNR(dB)",
         "Ptch(rad)",
@@ -100,6 +100,10 @@ class OtxCsvLogger(
 
     private fun measure(value: Float): String =
         if (value.isNaN()) "" else String.format(Locale.US, "%.1f", value)
+
+    /** The screen's degrees, logged in the radians the column has always named. */
+    private fun radians(degrees: Float): String =
+        String.format(Locale.US, "%.3f", Math.toRadians(degrees.toDouble()))
 
     init {
         val stem = name ?: SimpleDateFormat("yyyy-MM-dd HH-mm-ss").format(Date())
@@ -168,12 +172,12 @@ class OtxCsvLogger(
       "GPS"       GPS: 0.0 0.0
       "GSpd(kmh)" ground speed 0.0
       "Hdg(°)"    heading: 103.89444
-      "Ptch(rad)" pitchAngle -81.49752
-      "TPWR(mW)"  power 1
-      "Roll(rad)" rollAngle 83.99561
-      "1RSS(dB)"  rssi dbm1 -40
-      "2RSS(dB)"  rssi dbm2 0
-      "TRSS(dB)"  rssi dbmd -16
+      "Ptch(rad)" pitchAngle -1.422
+      "TPWR(mW)"  power 10
+      "Roll(rad)" rollAngle 1.466
+      "1RSS(dBm)" rssi dbm1 -40
+      "2RSS(dBm)" rssi dbm2 0
+      "TRSS(dBm)" rssi dbmd -16
       "RSSI(dB)"  rssi: 94
       "Sats"      sats 0
       -           fix: false
@@ -182,7 +186,7 @@ class OtxCsvLogger(
       "VFAS(V)"   voltage vbat or cell 16.4
 
     * */
-    private fun outputData(): Boolean {
+    internal fun outputData(): Boolean {
         val date = SimpleDateFormat("yyyy-MM-dd").format(Date())
         val time = SimpleDateFormat("HH:mm:ss.SSS").format(Date())
 
@@ -200,8 +204,8 @@ class OtxCsvLogger(
             rssiDbmd.toString(), // Downlink - signal strength
             dnLq.toString(),
             dnSnr.toString(),
-            pitchAngle.toString(),
-            rollAngle.toString(),
+            radians(pitchAngle),
+            radians(rollAngle),
             flightMode,
             vSpeed.toString(),
             "$latitude $longitude",

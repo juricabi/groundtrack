@@ -214,7 +214,9 @@ abstract class DataDecoder(protected val listener: Listener) {
         fun onStatusText(message: String)
         fun onDNSNRData(snr: Int)
         fun onUPSNRData(snr: Int)
+        /** The receiving antenna, 1 or 2. */
         fun onAntData(activeAntena: Int)
+        /** The transmitter's power, in milliwatts whatever the link sends. */
         fun onPowerData(power: Int)
         fun onRssiDbm1Data(rssi: Int)
         fun onRssiDbm2Data(rssi: Int)

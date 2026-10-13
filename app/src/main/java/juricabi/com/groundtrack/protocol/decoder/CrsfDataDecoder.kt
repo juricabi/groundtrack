@@ -9,6 +9,9 @@ import juricabi.com.groundtrack.protocol.SourceFreshness
 const val MAX_RSSI = -30
 const val MIN_RSSI = -120
 
+/** The link statistics' transmit power levels, in milliwatts. */
+private val CRSF_POWER_MW = intArrayOf(0, 10, 25, 100, 500, 1000, 2000, 250, 50)
+
 class CrsfDataDecoder(listener: Listener) : DataDecoder(listener) {
 
     private var newLatitude = false
@@ -344,10 +347,14 @@ https://github.com/iNavFlight/inav/blob/135456936834ab4129e6ed540038b2e88dcb3c44
                 listener.onUPSNRData(data.data)
             }
             Protocol.ANT -> {
-                listener.onAntData(data.data)
+                // Sent as 0 and 1, named 1 and 2 like the 1RSS and 2RSS it
+                // picks between — as EdgeTX names it for ExpressLRS.
+                listener.onAntData(data.data + 1)
             }
             Protocol.POWER -> {
-                listener.onPowerData(data.data)
+                // Sent as a level, handed on in milliwatts, which is what Ghost
+                // sends. A level past the table has no power to show.
+                CRSF_POWER_MW.getOrNull(data.data)?.let { listener.onPowerData(it) }
             }
             Protocol.RSSI_DBM_1 -> {
                 listener.onRssiDbm1Data(data.data)

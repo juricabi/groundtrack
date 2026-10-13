@@ -120,6 +120,29 @@ class CrsfProtocolTest {
         assertEquals(1500, channels?.get(15))
     }
 
+    @Test
+    fun linkStatisticsNameTheAntennaFromOneAndThePowerInMilliwatts() {
+        val antennas = ArrayList<Int>()
+        val powers = ArrayList<Int>()
+        val protocol = CrsfProtocol(object : DataDecoder.Companion.DefaultDecodeListener() {
+            override fun onAntData(activeAntena: Int) {
+                antennas.add(activeAntena)
+            }
+
+            override fun onPowerData(power: Int) {
+                powers.add(power)
+            }
+        })
+
+        // rssi 1 and 2, lq, snr, active antenna, rf mode, power level, then downlink
+        feed(protocol, frame(0x14, byteArrayOf(-60, -70, 100, 8, 1, 5, 3, -50, 100, 7)))
+        feed(protocol, frame(0x14, byteArrayOf(-60, -70, 100, 8, 0, 5, 9, -50, 100, 7)))
+
+        assertEquals(listOf(2, 1), antennas)
+        // level 3 is 100 mW; level 9 is past the table and says nothing
+        assertEquals(listOf(100), powers)
+    }
+
     /** Sixteen 11-bit channels, least significant bit first, into 22 bytes. */
     private fun packChannels(values: IntArray): ByteArray {
         val out = ByteArray(22)
