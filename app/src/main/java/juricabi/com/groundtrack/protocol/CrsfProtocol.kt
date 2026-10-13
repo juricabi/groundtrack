@@ -115,7 +115,11 @@ class CrsfProtocol : Protocol {
         private const val MIN_PACKET_LENGTH = 2
         private const val MIN_FRAME_SIZE = 4
 
-        //packet length + 1 byte crc
+        // Type and payload, the CRC already stripped: the least each frame
+        // carries, never the exact size. The spec has a receiver read the
+        // fields it knows and ignore any appended after them, and senders do
+        // append — EdgeTX 2.11.8 put a status byte on every channels frame,
+        // and an exact match dropped each one.
         private const val MIN_FLIGHT_MODE_PACKET_LEN = 4
         private const val GPS_PACKET_LEN = 16
         private const val ATTITUDE_PACKET_LEN = 7
@@ -202,7 +206,7 @@ class CrsfProtocol : Protocol {
             val type = data.get()
             when (type) {
                 BATTERY_TYPE.toByte() -> {
-                    if (inputData.size == BATTERY_PACKET_LEN) {
+                    if (inputData.size >= BATTERY_PACKET_LEN) {
                         val voltage = data.short
                         val current = data.short
                         val capacityArray = ByteArray(4)
@@ -253,7 +257,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 GPS_EXTENDED_TYPE.toByte() -> {
-                    if (inputData.size == GPS_EXTENDED_PACKET_LEN) {
+                    if (inputData.size >= GPS_EXTENDED_PACKET_LEN) {
                         dataDecoder.decodeData(Protocol.Companion.TelemetryData(GPS_FIX_TYPE, data.get().toInt() and 0xFF))
                         // The accuracy in centimetres when the receiver measured
                         // one — only u-blox's own protocol gives it, NMEA leaves
@@ -269,13 +273,13 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 BARO_TYPE.toByte() -> {
-                    if (inputData.size == BARO_PACKET_LEN) {
+                    if (inputData.size >= BARO_PACKET_LEN) {
                         data.int // pressure
                         dataDecoder.decodeData(Protocol.Companion.TelemetryData(TEMPERATURE, data.int / 10))
                     }
                 }
                 GPS_TYPE.toByte() -> {
-                    if (inputData.size == GPS_PACKET_LEN) {
+                    if (inputData.size >= GPS_PACKET_LEN) {
                         val latitude = data.int
                         val longitude = data.int
                         val groundSpeed = data.short
@@ -305,7 +309,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 VARIO_TYPE.toByte() -> {
-                    if (inputData.size == VARIO_PACKET_LEN) {
+                    if (inputData.size >= VARIO_PACKET_LEN) {
                         val vspeed = data.short
 
                         dataDecoder.decodeData( Protocol.Companion.TelemetryData( VSPEED, vspeed.toInt()))
@@ -332,7 +336,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 LINK_STATS.toByte() -> {
-                    if (inputData.size == LINK_STATS_PACKET_LEN) {
+                    if (inputData.size >= LINK_STATS_PACKET_LEN) {
                         val uplinkRSSIAnt1 = -1 * Math.abs( data.get().toByte().toInt()) // dBm
                         val uplinkRSSIAnt2 = -1 * Math.abs( data.get().toByte().toInt()) // dBm
                         val uplinkLQ = data.get().toUByte().toInt()
@@ -378,7 +382,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 ATTITUDE_TYPE.toByte() -> {
-                    if (inputData.size == ATTITUDE_PACKET_LEN) {
+                    if (inputData.size >= ATTITUDE_PACKET_LEN) {
                         val pitch = data.short
                         val roll = data.short
                         val yaw = data.short
@@ -388,7 +392,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 RC_CHANNELS_PACKED.toByte() -> {
-                    if (inputData.size == RC_CHANNELS_PACKED_PACKET_LEN) {
+                    if (inputData.size >= RC_CHANNELS_PACKED_PACKET_LEN) {
                         var bitsMerged = 0
                         var readValue: UInt = 0U;
                         var ch = 0;
@@ -407,7 +411,7 @@ class CrsfProtocol : Protocol {
                     }
                 }
                 AIRSPEED_SENSOR.toByte() -> {
-                    if (inputData.size == AIRSPEED_PACKET_LEN) {
+                    if (inputData.size >= AIRSPEED_PACKET_LEN) {
                         val airspeed = data.short // 0.1 km/h
                         dataDecoder.decodeData(Protocol.Companion.TelemetryData(ASPEED, airspeed.toInt()))
                     }

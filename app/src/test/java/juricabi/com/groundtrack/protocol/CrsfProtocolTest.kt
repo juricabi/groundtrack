@@ -102,6 +102,42 @@ class CrsfProtocolTest {
         assertEquals(-0.29f, verticalSpeed, 0.001f)
     }
 
+    @Test
+    fun channelsFrameCarryingEdgeTxStatusByteIsDecoded() {
+        // EdgeTX 2.11.8 appends a status byte to every channels frame; the
+        // spec has a receiver ignore what it does not know.
+        var channels: IntArray? = null
+        val protocol = CrsfProtocol(object : DataDecoder.Companion.DefaultDecodeListener() {
+            override fun onRCChannels(rcChannels: IntArray) {
+                channels = rcChannels.copyOf()
+            }
+        })
+
+        val values = IntArray(16) { 992 }.also { it[0] = 172 }
+        feed(protocol, frame(0x16, packChannels(values) + 0x02.toByte()))
+
+        assertEquals(988, channels?.get(0))
+        assertEquals(1500, channels?.get(15))
+    }
+
+    /** Sixteen 11-bit channels, least significant bit first, into 22 bytes. */
+    private fun packChannels(values: IntArray): ByteArray {
+        val out = ByteArray(22)
+        var bits = 0L
+        var count = 0
+        var at = 0
+        for (value in values) {
+            bits = bits or (value.toLong() shl count)
+            count += 11
+            while (count >= 8) {
+                out[at++] = bits.toByte()
+                bits = bits ushr 8
+                count -= 8
+            }
+        }
+        return out
+    }
+
     private fun frame(type: Int, payload: ByteArray): ByteArray {
         val body = byteArrayOf(type.toByte()) + payload
         val crc = CRC8()
