@@ -470,32 +470,15 @@ class TelemetryPanel(
     override fun onAntData(activeAntena: Int) {
         sensorTimeoutManager.onAntData(activeAntena)
         activity.runOnUiThread {
-            ant.text = (activeAntena + 1).toString()
+            ant.text = activeAntena.toString()
         }
     }
 
     override fun onPowerData(power: Int) {
         sensorTimeoutManager.onPowerData(power)
-        if (linkProtocol() == "GHST") {
-            // Ghost reports the power in mW and uses levels the CRSF table does not have
-            activity.runOnUiThread {
-                this.power.text =
-                    if (power >= 1000 && power % 1000 == 0) "${power / 1000}W" else "${power}mW"
-            }
-            return
-        }
         activity.runOnUiThread {
-            when (power) {
-                1 -> this.power.text = "10mW"
-                2 -> this.power.text = "25mW"
-                3 -> this.power.text = "100mW"
-                4 -> this.power.text = "500mW"
-                5 -> this.power.text = "1W"
-                6 -> this.power.text = "2W"
-                7 -> this.power.text = "250mW"
-                8 -> this.power.text = "50mW"
-                else -> this.power.text = power.toString()
-            }
+            this.power.text =
+                if (power >= 1000 && power % 1000 == 0) "${power / 1000}W" else "${power}mW"
         }
     }
 
