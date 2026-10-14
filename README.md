@@ -305,6 +305,12 @@ callback goes into both `ForwardingListener` and `MulticastListener`. Moving
 2D geometry stays on the shared custom render scene — never a GeoJSON source
 updated at frame rate.
 
+## Support
+
+If it's useful to you, you can buy me a coffee:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/juricabi)
+
 ## Lineage
 
 - [CrazyDude1994](https://github.com/CrazyDude1994/android-taranis-smartport-telemetry): original app
