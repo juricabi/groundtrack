@@ -1,4 +1,4 @@
-# Groundtrack 2.6.1
+# Groundtrack 2.6.2
 
 Live and recorded RC telemetry on a smooth 2D map or real 3D terrain, with live
 video beside it. This is [juricabi's fork](https://github.com/juricabi/groundtrack).
