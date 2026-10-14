@@ -18,6 +18,16 @@
     <string name="pair_new_device">My device is not in list - Pair...</string>
     <string name="pair_not_supported_message">Please pair your device manually from the android bluetooth settings menu</string>
 
+    <!-- Ko-fi: the Settings row and the card say it the same way -->
+    <string name="kofi_url">https://ko-fi.com/juricabi</string>
+    <string name="support_title">Support Groundtrack ☕</string>
+    <string name="support_summary">Groundtrack is free. If you like it, you can buy me a coffee on Ko-fi.</string>
+    <string name="support_card_title">Enjoying Groundtrack?</string>
+    <string name="support_card_text">It\'s free. If you like it, you can buy me a coffee.</string>
+    <string name="support_kofi">Ko-fi</string>
+    <string name="support_not_now">Not now</string>
+    <string name="support_never">Don\'t show again</string>
+
     <string-array name="BatteryUnits">
         <item>Percentage</item>
         <item>mAh</item>

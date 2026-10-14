@@ -438,4 +438,16 @@
         </Preference>
     </PreferenceCategory>
 
+    <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            app:iconSpaceReserved="false" android:title="About">
+
+        <Preference
+            app:iconSpaceReserved="false"
+                android:key="support"
+                android:title="@string/support_title"
+                android:summary="@string/support_summary"/>
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

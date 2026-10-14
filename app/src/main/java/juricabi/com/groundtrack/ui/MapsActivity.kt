@@ -414,6 +414,9 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
     /** The log list, its two modes and its import/export, lifted to their own file. */
     private val logManager = LogManager(this)
 
+    /** The Ko-fi card; the log list and the end of a replay raise it. */
+    internal lateinit var supportPrompt: SupportPrompt
+
 
     private var reconnectionStartTime = 0L;
 
@@ -580,6 +583,9 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
             linkProtocol = { detectedProtocol }
         )
         connectFlow = ConnectFlow(this, preferenceManager)
+        supportPrompt = SupportPrompt(this, preferenceManager, ::showDialog) {
+            dataService?.isConnected() == true || reconnectOnFailure
+        }
         videoPane = VideoPane(
             this, preferenceManager,
             showDialog = ::showDialog,
@@ -1689,6 +1695,11 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
                             playButton.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.ic_pause));
                         } else {
                             playButton.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.ic_play));
+                            // played to its end, not paused: only the player's
+                            // own timer stops at the last packet
+                            if (logPlayer?.currentPosition == seekBar.max) {
+                                supportPrompt.onReplayFinished(logManager.flightCount())
+                            }
                         }
                     }
                 }

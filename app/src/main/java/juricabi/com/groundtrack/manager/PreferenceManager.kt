@@ -174,6 +174,19 @@ class PreferenceManager(context: Context) {
         sharedPreferences.edit().putBoolean("storage_asked_at_start", true).apply()
     }
 
+    /**
+     * The Ko-fi card's one memory: null until it has been shown, then the
+     * number of flights in the log list that brings it back. See SupportPrompt.
+     */
+    fun getSupportAskAt(): Int? {
+        if (!sharedPreferences.contains("support_ask_at")) return null
+        return sharedPreferences.getInt("support_ask_at", 0)
+    }
+
+    fun setSupportAskAt(flights: Int) {
+        sharedPreferences.edit().putInt("support_ask_at", flights).apply()
+    }
+
     /** "off", "usb" or "network": where the live picture comes from. */
     fun getVideoSource(): String {
         return sharedPreferences.getString("video_source", "off") ?: "off"

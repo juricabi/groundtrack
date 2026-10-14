@@ -151,6 +151,10 @@ class PrefsFragment : PreferenceFragmentCompat() {
             showManageFlightPlansDialog()
             return@setOnPreferenceClickListener true
         }
+        findPreference("support").setOnPreferenceClickListener {
+            SupportPrompt.openKofi(context!!)
+            true
+        }
         // Validate: display altitude ceiling must be >= warning altitude ceiling
         findPreference("fr24_warning_alt_ceiling").setOnPreferenceChangeListener { _, newValue ->
             val warningCeiling = (newValue as? String)?.toIntOrNull() ?: 1500

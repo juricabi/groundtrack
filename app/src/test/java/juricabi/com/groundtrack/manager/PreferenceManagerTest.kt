@@ -63,4 +63,12 @@ class PreferenceManagerTest {
         fresh().setCrsfSystemOverride(null)
         assertEquals(null, fresh().getCrsfSystemOverride())
     }
+
+    @Test
+    fun theKofiCardStartsUnaskedAndRemembersItsAnswer() {
+        // null is "never shown", which is what lets a finished replay ask
+        assertEquals(null, fresh().getSupportAskAt())
+        fresh().setSupportAskAt(13)
+        assertEquals(13, fresh().getSupportAskAt())
+    }
 }

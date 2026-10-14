@@ -74,6 +74,9 @@ issues and reviews use these terms as written here.
   asks take turns and repeats are dropped.
 - **TrafficWarnings** (`ui/TrafficWarnings.kt`) — a nearby aircraft said out
   loud, and the speech engine that exists for nothing else.
+- **SupportPrompt** (`ui/SupportPrompt.kt`) — the Ko-fi card and the one way
+  to Ko-fi. Asked at most twice, from the log list (ten flights) or the end
+  of a replay, never during a flight; the Settings row opens the same link.
 - **The link's protocol** is the activity's fact (flight decisions hang on
   it — the LTM altitude settle); the TelemetryPanel only renders under it,
   through a provider.

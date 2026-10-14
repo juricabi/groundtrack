@@ -333,7 +333,12 @@ class LogManager(private val host: MapsActivity) {
             if (idx >= 0) listView.post { listView.setSelectionFromTop(idx, listView.height / 2) }
         }
         host.showDialog(built)
+        // after the list, so the card stands over it and the list is there behind
+        host.supportPrompt.onLogList(files.size)
     }
+
+    /** How many flights the list holds — what the Ko-fi card counts. */
+    fun flightCount(): Int = currentLogFiles().size
 
     /** When the log now happened, from its name if that is a stamp, else its file time. */
     private fun logTime(f: File): Long = try {
