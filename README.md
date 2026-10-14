@@ -307,7 +307,7 @@ updated at frame rate.
 
 ## Support
 
-If it's useful to you, you can buy me a coffee:
+Groundtrack is a fork: the original app is RomanLut's (see Lineage below), and he takes support on [Patreon](https://www.patreon.com/android_rc_telemetry). If the work in this fork is useful to you, you can buy me a coffee:
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/juricabi)
 
