@@ -43,13 +43,56 @@ class StatusTextTest {
     }
 
     @Test
-    fun aFullLengthMavLink2TextStopsAtFiftyBeforeTheChunkFields() {
+    fun aFullLengthMavLink2TextIsWholeWithoutANul() {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)
         val words = "x".repeat(50)
-        // id 7, chunk 1: the fields that follow the text in MAVLink 2
-        feed(protocol, mav2Frame(STATUSTEXT, text(6, words) + byteArrayOf(7, 0, 1)))
+        // id 0: the only chunk there is, its fifty characters with no NUL
+        feed(protocol, mav2Frame(STATUSTEXT, text(6, words) + byteArrayOf(0, 0, 0)))
         assertEquals(listOf(words to 6), ear.said)
+    }
+
+    private fun chunk(severity: Int, words: String, id: Int, seq: Int) =
+        mav2Frame(STATUSTEXT, text(severity, words) + byteArrayOf(id.toByte(), (id shr 8).toByte(), seq.toByte()))
+
+    @Test
+    fun aLongMessageInChunksArrivesWhole() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        val long = "Preflight Fail: Accel Sensor 0 missing - check the IMU wiring and power, then reboot the vehicle"
+        long.chunked(50).forEachIndexed { k, part -> feed(protocol, chunk(3, part, id = 0x1234, seq = k)) }
+        assertEquals(listOf(long to 3), ear.said)
+    }
+
+    @Test
+    fun aMessageOfWholeChunksEndsWithAnEmptyOne() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        val long = "y".repeat(100)
+        feed(protocol, chunk(4, long.take(50), id = 9, seq = 0))
+        feed(protocol, chunk(4, long.drop(50), id = 9, seq = 1))
+        assertEquals(emptyList<Pair<String, Int>>(), ear.said)
+        feed(protocol, chunk(4, "", id = 9, seq = 2))
+        assertEquals(listOf(long to 4), ear.said)
+    }
+
+    @Test
+    fun aChunkLostOnTheLinkSendsOnWhatCame() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        feed(protocol, chunk(2, "a".repeat(50), id = 5, seq = 0))
+        // chunk 1 never came; the next message begins
+        feed(protocol, chunk(2, "Battery failsafe", id = 6, seq = 0))
+        assertEquals(listOf("a".repeat(50) to 2, "Battery failsafe" to 2), ear.said)
+    }
+
+    @Test
+    fun aMessageInOnePieceGoesAfterOneBeingGathered() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        feed(protocol, chunk(6, "b".repeat(50), id = 7, seq = 0))
+        feed(protocol, mav2Frame(STATUSTEXT, text(6, "Armed")))
+        assertEquals(listOf("b".repeat(50) to 6, "Armed" to 6), ear.said)
     }
 
     @Test

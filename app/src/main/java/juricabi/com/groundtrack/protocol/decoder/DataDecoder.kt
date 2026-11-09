@@ -283,14 +283,15 @@ abstract class DataDecoder(protected val listener: Listener) {
 /**
  * A status text's words and severity, cut the same way whichever link carried
  * them: the severity in [Protocol.Companion.TelemetryData.data], the text from
- * byte 1 up to the first NUL and never past byte 50 — a MAVLink 2 payload goes
- * on with the chunk fields after it, and keeping the padding made two copies of
- * one message read as different. An empty text is no message.
+ * byte 1 up to the first NUL or the end — MAVLink pads a short text to fifty
+ * bytes, and keeping the padding made two copies of one message read as
+ * different. A message a link sent in pieces arrives here joined. An empty
+ * text is no message.
  */
 internal fun statusTextOf(data: Protocol.Companion.TelemetryData): Pair<String, Int>? {
     val raw = data.rawData ?: return null
     var end = 1
-    while (end < minOf(raw.size, 51) && raw[end] != 0.toByte()) end++
+    while (end < raw.size && raw[end] != 0.toByte()) end++
     if (end == 1) return null
     return String(raw, 1, end - 1) to (data.data and 0xFF)
 }

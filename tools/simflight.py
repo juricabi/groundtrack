@@ -286,18 +286,46 @@ def hl2_payload(t_ms, lat, lon, custom_mode, alt_msl_m, heading_deg,
         base_mode, 0, 0)
 
 
-def mav2_frame(seq, payload):
+def mav2_frame(seq, payload, msg_id=HL2_ID, crc_extra=HL2_CRC_EXTRA):
+    # MAVLink 2 drops a payload's trailing zeros off the wire
+    payload = payload.rstrip(b"\x00") or b"\x00"
     header = struct.pack("<BBBBBBBBBB", 0xFD, len(payload), 0, 0, seq & 0xFF,
-                         1, 1, HL2_ID & 0xFF, (HL2_ID >> 8) & 0xFF,
-                         (HL2_ID >> 16) & 0xFF)
-    crc = x25_crc(header[1:] + payload, HL2_CRC_EXTRA)
+                         1, 1, msg_id & 0xFF, (msg_id >> 8) & 0xFF,
+                         (msg_id >> 16) & 0xFF)
+    crc = x25_crc(header[1:] + payload, crc_extra)
     return header + payload + struct.pack("<H", crc)
 
 
-def mav1_frame(seq, payload):
-    header = struct.pack("<BBBBBB", 0xFE, len(payload), seq & 0xFF, 1, 1, HL2_ID)
-    crc = x25_crc(header[1:] + payload, HL2_CRC_EXTRA)
+def mav1_frame(seq, payload, msg_id=HL2_ID, crc_extra=HL2_CRC_EXTRA):
+    header = struct.pack("<BBBBBB", 0xFE, len(payload), seq & 0xFF, 1, 1, msg_id)
+    crc = x25_crc(header[1:] + payload, crc_extra)
     return header + payload + struct.pack("<H", crc)
+
+
+STATUSTEXT_ID = 253
+STATUSTEXT_CRC_EXTRA = 83
+
+
+def statustext_payloads(severity, text, text_id, version):
+    """STATUSTEXT as a link sends it: one message, or, longer than fifty
+    characters on MAVLink 2, fifty-character chunks under one id as PX4 sends
+    them, the last with a NUL in it. MAVLink 1 has no chunks: cut at fifty."""
+    raw = text.encode("ascii")
+    if version == 1 or len(raw) <= 50:
+        body = struct.pack("<B50s", severity, raw[:50])
+        return [body if version == 1 else body + struct.pack("<HB", 0, 0)]
+    pieces = [raw[i:i + 50] for i in range(0, len(raw), 50)]
+    if len(pieces[-1]) == 50:
+        pieces.append(b"")  # a whole number of chunks ends with an empty one
+    return [struct.pack("<B50sHB", severity, piece, text_id, seq)
+            for seq, piece in enumerate(pieces)]
+
+
+# what a vehicle says now and then over a MAVLink link, one long enough to go in pieces
+MAVLINK_TEXTS = [
+    (6, "Takeoff detected"),
+    (3, "Preflight Fail: Accel Sensor 0 missing - check the IMU wiring and power, then reboot"),
+]
 
 
 COMMAND_LONG_ID = 76
@@ -448,6 +476,10 @@ def main():
     parser.add_argument("--protocol", choices=("crsf", "mavlink-hl"),
                         default="crsf")
     parser.add_argument("--mavlink-version", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--texts", action="store_true",
+                        help="with --protocol mavlink-hl: STATUSTEXT too, every "
+                             "20 s, a short one and one long enough that MAVLink "
+                             "2 sends it in chunks, as PX4 does")
     parser.add_argument("--hl-period", type=float, default=5.0,
                         help="seconds between HIGH_LATENCY2 messages; ArduPilot "
                              "sends one per five")
@@ -590,6 +622,7 @@ def main():
     used_mah = 0.0
     passthrough_turn = 0
     hl_seq = 0
+    text_id = 0
 
     enabled = not args.wait_enable
     if dump is None:
@@ -738,6 +771,15 @@ def main():
                     if args.mavlink_version == 2 else mav1_frame(hl_seq, payload)
                 send(framed)
                 hl_seq += 1
+            if args.texts and enabled and now - last["burst"] >= 20.0:
+                last["burst"] = now
+                text_id += 1
+                for severity, text in MAVLINK_TEXTS:
+                    for body in statustext_payloads(severity, text, text_id, args.mavlink_version):
+                        send(mav2_frame(hl_seq, body, STATUSTEXT_ID, STATUSTEXT_CRC_EXTRA)
+                             if args.mavlink_version == 2 else
+                             mav1_frame(hl_seq, body, STATUSTEXT_ID, STATUSTEXT_CRC_EXTRA))
+                        hl_seq += 1
             if dump is None:
                 time.sleep(0.04)
             continue
