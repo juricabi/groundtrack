@@ -39,7 +39,7 @@ class LogPlayerMessagesTest {
     private fun text(severity: Int, words: String): ByteArray =
         frame(0x80, byteArrayOf(0xF1.toByte(), severity.toByte()) + words.toByteArray() + byteArrayOf(0))
 
-    private fun load(log: ByteArray, screen: Screen): Pair<LogPlayer, Int> {
+    private fun load(log: ByteArray, screen: Screen, askEarly: Boolean = false): Pair<LogPlayer, Int> {
         val file = File.createTempFile("messages", ".tlm").apply { writeBytes(log); deleteOnExit() }
         val player = LogPlayer(screen)
         var size = -1
@@ -52,6 +52,8 @@ class LogPlayerMessagesTest {
             override fun getPlaybackAutostart() = false
             override fun onProtocolDetected(protocolName: String) {}
         })
+        // as the screen does when the CSV's clock is read before the log is
+        if (askEarly) player.messages()
         val until = System.currentTimeMillis() + 10_000
         while (size < 0 && System.currentTimeMillis() < until) {
             Thread.sleep(10)
@@ -81,5 +83,12 @@ class LogPlayerMessagesTest {
         assertEquals(0, player.messagesBefore(all[0].index).size)
         assertEquals(1, player.messagesBefore(all[0].index + 1).size)
         assertEquals(3, player.messagesBefore(size).size)
+    }
+
+    @Test
+    fun askedWhileTheLogWasStillLoadingTheMessagesAreThereOnceItHas() {
+        val log = List(5) { gps(it) }.reduce(ByteArray::plus) + text(4, "Battery 1 low") + gps(5)
+        val (player, _) = load(log, Screen(), askEarly = true)
+        assertEquals(listOf("Battery 1 low"), player.messages().map { it.text })
     }
 }

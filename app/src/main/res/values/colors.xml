@@ -16,7 +16,8 @@
     <!-- The amber the settings screen already warns in (PrefsFragment 0xFFF9A825). -->
     <color name="colorWarning">#FFF9A825</color>
     <!-- A message's severity in the history, each 4.5:1 or better on its
-         theme's dialog: white by day, the dark floating grey by night. -->
+         theme's dialog: white by day (#C62828 5.6:1, #B45309 5.0:1), the
+         dark floating grey #424242 by night (#FF9A93 4.9:1, #F9A825 5.0:1). -->
     <color name="messageError">#FFC62828</color>
     <color name="messageWarning">#FFB45309</color>
 </resources>

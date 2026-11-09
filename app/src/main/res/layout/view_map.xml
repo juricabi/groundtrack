@@ -212,7 +212,9 @@
              (MessageHistory), and only its own few words take a touch, so a
              pan starting anywhere else along this row still reaches the map.
              The message line follows it, at the edge when it is gone. -->
-        <juricabi.com.groundtrack.ui.TextViewOutline
+        <!-- a plain TextView: its backing keeps it readable, and an outline's
+             extra size sat below and to the right of the words inside it -->
+        <TextView
                 android:id="@+id/messages_tab"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -220,17 +222,16 @@
                 android:layout_alignBaseline="@+id/statustext"
                 android:layout_marginStart="8dp"
                 android:background="@drawable/bg_messages_tab"
-                android:contentDescription="Messages"
                 android:paddingStart="8dp"
                 android:paddingTop="4dp"
                 android:paddingEnd="8dp"
                 android:paddingBottom="4dp"
+                android:shadowColor="@android:color/black"
+                android:shadowRadius="2"
                 android:textColor="@android:color/white"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:visibility="gone"
-                app:outlineColor="@android:color/black"
-                app:outlineSize="2dp" />
+                android:visibility="gone" />
 
         <juricabi.com.groundtrack.ui.TextViewOutline
                 android:id="@+id/statustext"
@@ -238,8 +239,8 @@
                 android:layout_height="wrap_content"
                 android:layout_alignWithParentIfMissing="true"
                 android:layout_above="@id/mode"
-                android:layout_toLeftOf="@+id/buttons_box"
                 android:layout_toEndOf="@id/messages_tab"
+                android:layout_toStartOf="@+id/buttons_box"
                 android:layout_marginStart="8dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginBottom="-12dp"

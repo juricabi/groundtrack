@@ -3244,6 +3244,9 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
     internal fun switchToIdleState() {
         this.logPlayer?.dispose();
         this.logPlayer = null;
+        // and the rows built from it, which held the whole decoded recording
+        replayRowsKey = null
+        replayRows = emptyList()
         // out of a replay: the history is the live flight's again
         messageHistory.refresh()
         // out of the replay, so the sky is worth watching again

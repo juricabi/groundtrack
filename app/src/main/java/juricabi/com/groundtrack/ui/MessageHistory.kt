@@ -57,7 +57,9 @@ class MessageHistory(
     fun refresh() {
         val now = rows()
         tab.visibility = if (now.isEmpty()) View.GONE else View.VISIBLE
-        tab.text = if (now.size == 1) "1 message" else "${now.size} messages"
+        // asked every tick of a playing replay: set only when it says another thing
+        val label = if (now.size == 1) "1 message" else "${now.size} messages"
+        if (tab.text.toString() != label) tab.text = label
         val open = dialog ?: return
         // a history with nothing in it is not left standing
         if (now.isEmpty()) {
@@ -111,14 +113,7 @@ class MessageHistory(
             // Over a live flight the flight stays readable around it — the
             // model, the tiles, the next message on the line.
             if (jump() == null) built.window?.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            // Capped, so a long flight's history scrolls rather than covering
-            // the screen: rows wrap to any height, so measured, not counted.
-            listView.post {
-                val cap = (m.heightPixels * 0.6).toInt()
-                if (listView.height > cap) {
-                    listView.layoutParams = listView.layoutParams?.apply { height = cap }
-                }
-            }
+            cap()
         }
         dialog = built
         showDialog(built)
@@ -131,6 +126,9 @@ class MessageHistory(
      */
     private fun show(now: List<Message>) {
         val newestFirst = now.asReversed().toList()
+        // The same rows, as a playing replay asks every tick: told of a
+        // change it has not had, the list drops the tap that was to jump.
+        if (newestFirst == shown) return
         val listView = list
         val first = listView?.firstVisiblePosition ?: 0
         val offset = listView?.getChildAt(0)?.top ?: 0
@@ -139,6 +137,22 @@ class MessageHistory(
         shown = newestFirst
         adapter?.notifyDataSetChanged()
         if (listView != null && !atTop && grown > 0) listView.setSelectionFromTop(first + grown, offset)
+        cap()
+    }
+
+    /**
+     * Held to most of the screen, so a long flight's history scrolls rather
+     * than covering it — as it opens and as it grows: rows wrap to any
+     * height, so the list is measured, not counted.
+     */
+    private fun cap() {
+        val listView = list ?: return
+        listView.post {
+            val cap = (activity.resources.displayMetrics.heightPixels * 0.6).toInt()
+            if (listView.height > cap) {
+                listView.layoutParams = listView.layoutParams?.apply { height = cap }
+            }
+        }
     }
 
     private fun row(): LinearLayout {

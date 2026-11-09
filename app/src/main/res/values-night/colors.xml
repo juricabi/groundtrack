@@ -4,6 +4,6 @@
     <color name="settingsTextPrimary">#ECECEC</color>
     <color name="settingsTextSecondary">#B3B3B3</color>
     <color name="settingsAccent">#4FC3F7</color>
-    <color name="messageError">#FFFF8A80</color>
+    <color name="messageError">#FFFF9A93</color>
     <color name="messageWarning">#FFF9A825</color>
 </resources>

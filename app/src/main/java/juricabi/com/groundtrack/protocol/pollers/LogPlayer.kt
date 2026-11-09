@@ -281,6 +281,9 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
         override fun onPostExecute(result: ArrayList<Protocol.Companion.TelemetryData>) {
             cachedData = result
             offsets = decoded
+            // asked while the log was still decoding — the CSV's clock or a
+            // decoder's restart can get in first — its messages were none
+            recorded = null
             dataReadyListener?.onDataReady(result.size)
 
             if (dataReadyListener?.getPlaybackAutostart() == true ){
