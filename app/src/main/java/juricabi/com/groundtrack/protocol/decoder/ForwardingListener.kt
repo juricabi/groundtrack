@@ -71,7 +71,7 @@ open class ForwardingListener(
     override fun onRpmData(rpm: Int) = relay { it.onRpmData(rpm) }
     override fun onGPSPrecisionData(precision: GpsPrecision) = relay { it.onGPSPrecisionData(precision) }
     override fun onRCChannels(rcChannels: IntArray) = relay { it.onRCChannels(rcChannels) }
-    override fun onStatusText(message: String) = relay { it.onStatusText(message) }
+    override fun onStatusText(message: String, severity: Int) = relay { it.onStatusText(message, severity) }
     override fun onDNSNRData(snr: Int) = relay { it.onDNSNRData(snr) }
     override fun onUPSNRData(snr: Int) = relay { it.onUPSNRData(snr) }
     override fun onAntData(activeAntena: Int) = relay { it.onAntData(activeAntena) }

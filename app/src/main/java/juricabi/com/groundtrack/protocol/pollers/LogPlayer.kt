@@ -5,6 +5,7 @@ import android.os.Environment
 import juricabi.com.groundtrack.maps.Position
 import juricabi.com.groundtrack.protocol.*
 import juricabi.com.groundtrack.protocol.decoder.DataDecoder
+import juricabi.com.groundtrack.protocol.decoder.statusTextOf
 import java.io.File
 import java.io.FileInputStream
 import java.io.PrintWriter
@@ -96,7 +97,6 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
     private lateinit var protocol: Protocol
 
 
-    private var statusTextExpire : Int = 0;
 
     private var fireGPSState = false;
     /** Inside a seek's second pass, re-firing the frames that changed the fix. */
@@ -295,9 +295,6 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
     }
 
     fun seek(position: Int) {
-        // where this step started, for ageing the status text by the flight
-        // it covers — currentPosition has moved on by the time that is asked
-        val walkedFrom = if (position >= currentPosition) currentPosition else 0
         //seek forward: fire all packets from last position to new position
         //seek backward: fire all packets from the start to the new position
 
@@ -317,9 +314,8 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
         var addToEnd: Boolean = false;
 
         if ( position == 0) {
-            //clear router line and message
+            //clear router line
             protocol.dataDecoder.restart()
-            this.expireStatusText(10000)
         }
 
         if (position > currentPosition) {
@@ -445,9 +441,6 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
         if ( outDecodedCoordinates.size > 0 ) {
             originalListener.onGPSData(outDecodedCoordinates, addToEnd)
         }
-        // and the message ages by however much flight this seek covered,
-        // counted once for the whole step rather than per fix
-        if (position > walkedFrom) this.expireStatusText(flightMsAcross(position - walkedFrom))
 
         originalListener?.commit();
     }
@@ -626,47 +619,39 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
         }
     }
 
-    override fun onStatusText(message : String) {
-        this.statusTextExpire = statusTextHoldMs;
-        originalListener.onStatusText(message)
-    }
-
-
     /**
-     * How long a status text stands, in milliseconds of the flight.
-     *
-     * It used to count the fixes that went by, ten of them, which is ten
-     * seconds on a link reporting once a second and one second on a link
-     * reporting ten times — so the same message that stood throughout a live
-     * flight blinked its way through the replay of it. The live screen holds
-     * one for ten seconds without a newer one; a replay of that flight should
-     * do the same, in the flight's own time rather than the room's.
+     * Every message in the recording, in the order it came, with the packet it
+     * came in — asked of the recording, not heard on replay: a seek hands on
+     * only the last reading of each kind in the stretch it walks, so a scrub
+     * or a fast replay said a fraction of them. Cut by the decoders' own
+     * [statusTextOf], so they read as they did live.
      */
-    fun expireStatusText(elapsedMs: Int) {
-        if (this.statusTextExpire > 0) {
-            this.statusTextExpire -= elapsedMs;
-            if (this.statusTextExpire <= 0) {
-                this.statusTextExpire = 0;
-                originalListener.onStatusText("")
-            }
+    fun messages(): List<RecordedMessage> {
+        recorded?.let { return it }
+        val found = ArrayList<RecordedMessage>()
+        for ((index, data) in cachedData.withIndex()) {
+            if (data.telemetryType != Protocol.STATUSTEXT) continue
+            statusTextOf(data)?.let { (text, severity) -> found.add(RecordedMessage(index, text, severity)) }
         }
+        recorded = found
+        return found
     }
 
-    /** As long as the live screen holds one: [SensorTimeoutManager.DEFAULT_TIMEOUT_MS]. */
-    private val statusTextHoldMs = 10_000
-
-    /**
-     * How much of the flight a run of packets covers, evenly paced. The
-     * recording carries no clock of its own beyond its total length, and an
-     * even pace is right enough for deciding when a message has gone stale.
-     */
-    private fun flightMsAcross(packets: Int): Int {
-        val total = cachedData.size
-        if (total <= 0 || packets <= 0) return 0
-        val durationMs = (dataReadyListener?.getTotalPlaybackDurationSec() ?: 0) * 1000L
-        if (durationMs <= 0L) return 0
-        return (durationMs * packets / total).toInt()
+    /** The messages a replay standing at [position] has passed. */
+    fun messagesBefore(position: Int): List<RecordedMessage> {
+        val all = messages()
+        var lo = 0
+        var hi = all.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (all[mid].index < position) lo = mid + 1 else hi = mid
+        }
+        return all.subList(0, lo)
     }
+
+    class RecordedMessage(val index: Int, val text: String, val severity: Int)
+
+    private var recorded: List<RecordedMessage>? = null
 
     override fun onProtocolDetected( protocolName: String) {
         // What the decoder says while the log is being played, as against what

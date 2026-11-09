@@ -20,6 +20,7 @@ class BusListenersTest {
         override fun onTemperatureData(celsius: Float) { heard.add("temp:$celsius") }
         override fun onRpmData(rpm: Int) { heard.add("rpm:$rpm") }
         override fun onGPSPrecisionData(precision: GpsPrecision) { heard.add(precision.text()) }
+        override fun onStatusText(message: String, severity: Int) { heard.add("text:$message:$severity") }
     }
 
     // These are defaulted empty on the interface, so the compiler does
@@ -32,6 +33,14 @@ class BusListenersTest {
         bus.onRpmData(21000)
         bus.onGPSPrecisionData(GpsPrecision.Hdop(1.2f))
         assertEquals(listOf("temp:71.5", "rpm:21000", GpsPrecision.Hdop(1.2f).text()), ear.heard)
+    }
+
+    @Test
+    fun aMessageIsRelayedWithItsSeverity() {
+        val ear = Ear()
+        MulticastListener({ ear }).onStatusText("PreArm: GPS not healthy", 2)
+        ForwardingListener(ear).onStatusText("Armed", 6)
+        assertEquals(listOf("text:PreArm: GPS not healthy:2", "text:Armed:6"), ear.heard)
     }
 
     @Test

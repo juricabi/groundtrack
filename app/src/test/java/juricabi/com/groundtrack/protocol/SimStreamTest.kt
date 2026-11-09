@@ -27,6 +27,7 @@ class SimStreamTest {
         var distance = -1
         var heading = Float.NaN
         var status = ""
+        var severity = -1
         var decodes = 0
 
         override fun onGPSData(latitude: Double, longitude: Double) {
@@ -46,7 +47,7 @@ class SimStreamTest {
         override fun onFuelData(fuel: Int) { this.fuel = fuel }
         override fun onDistanceData(distance: Int) { this.distance = distance }
         override fun onHeadingData(heading: Float) { this.heading = heading }
-        override fun onStatusText(message: String) { status = message }
+        override fun onStatusText(message: String, severity: Int) { status = message; this.severity = severity }
         override fun onSuccessDecode() { decodes++ }
     }
 

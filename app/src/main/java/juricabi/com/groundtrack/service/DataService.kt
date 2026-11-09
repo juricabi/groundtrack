@@ -643,6 +643,12 @@ class DataService private constructor(
         bus.onFlyModeData(armed, heading, firstFlightMode, secondFlightMode)
     }
 
+    // kept before any ear hears it: a screen that looks on hearing it finds it
+    override fun onStatusText(message: String, severity: Int) {
+        FlightMessages.add(message, severity, System.currentTimeMillis())
+        bus.onStatusText(message, severity)
+    }
+
     fun disconnect() {
         onDisconnected()
     }

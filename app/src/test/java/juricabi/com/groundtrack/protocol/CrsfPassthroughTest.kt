@@ -32,6 +32,7 @@ class CrsfPassthroughTest {
         var heading = Float.NaN
         var vspeed = Float.NaN
         var status = ""
+        var severity = -1
         val vbatValues = ArrayList<Float>()
 
         override fun onVBATData(voltage: Float) { vbat = voltage; vbatValues.add(voltage) }
@@ -54,7 +55,7 @@ class CrsfPassthroughTest {
         override fun onPitchData(pitchAngle: Float) { pitch = pitchAngle }
         override fun onHeadingData(heading: Float) { this.heading = heading }
         override fun onVSpeedData(vspeed: Float) { this.vspeed = vspeed }
-        override fun onStatusText(message: String) { status = message }
+        override fun onStatusText(message: String, severity: Int) { status = message; this.severity = severity }
         val namedAs = ArrayList<String>()
         override fun onProtocolDetected(protocolName: String) { namedAs.add(protocolName) }
     }
@@ -157,6 +158,18 @@ class CrsfPassthroughTest {
         val captor = Captor()
         feed(CrsfProtocol(captor), frame(0x80, payload))
         assertEquals("Battery 1 low", captor.status)
+        assertEquals(4, captor.severity)
+    }
+
+    @Test
+    fun anEmergencyIsCutAsCleanlyAsAnyOtherText() {
+        // severity 0 sits where the cut used to look for the end of the text,
+        // and the whole padded buffer came along behind the words
+        val payload = byteArrayOf(0xF1.toByte(), 0) + "Crash: Disarming".toByteArray() + byteArrayOf(0)
+        val captor = Captor()
+        feed(CrsfProtocol(captor), frame(0x80, payload))
+        assertEquals("Crash: Disarming", captor.status)
+        assertEquals(0, captor.severity)
     }
 
     @Test

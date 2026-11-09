@@ -105,7 +105,7 @@ abstract class DataDecoder(protected val listener: Listener) {
             override fun onAirSpeedData(speed: Float) {
             }
 
-            override fun onStatusText(message:String) {
+            override fun onStatusText(message: String, severity: Int) {
             }
 
             override fun onDNSNRData(snr: Int) {
@@ -211,7 +211,11 @@ abstract class DataDecoder(protected val listener: Listener) {
          */
         fun onGPSPrecisionData(precision: GpsPrecision) {}
         fun onRCChannels(rcChannels:IntArray)
-        fun onStatusText(message: String)
+        /**
+         * A message from the autopilot, at its MAVLink severity: 0 emergency,
+         * 1 alert, 2 critical, 3 error, 4 warning, 5 notice, 6 info, 7 debug.
+         */
+        fun onStatusText(message: String, severity: Int)
         fun onDNSNRData(snr: Int)
         fun onUPSNRData(snr: Int)
         /** The receiving antenna, 1 or 2. */
@@ -274,4 +278,19 @@ abstract class DataDecoder(protected val listener: Listener) {
             telemetryType == Protocol.GPS_HOME_LONGITUDE;
     }
 
+}
+
+/**
+ * A status text's words and severity, cut the same way whichever link carried
+ * them: the severity in [Protocol.Companion.TelemetryData.data], the text from
+ * byte 1 up to the first NUL and never past byte 50 — a MAVLink 2 payload goes
+ * on with the chunk fields after it, and keeping the padding made two copies of
+ * one message read as different. An empty text is no message.
+ */
+internal fun statusTextOf(data: Protocol.Companion.TelemetryData): Pair<String, Int>? {
+    val raw = data.rawData ?: return null
+    var end = 1
+    while (end < minOf(raw.size, 51) && raw[end] != 0.toByte()) end++
+    if (end == 1) return null
+    return String(raw, 1, end - 1) to (data.data and 0xFF)
 }

@@ -27,6 +27,9 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import juricabi.com.groundtrack.R
+import juricabi.com.groundtrack.service.FlightMessages
+import juricabi.com.groundtrack.service.Message
+import juricabi.com.groundtrack.service.MessageRows
 import juricabi.com.groundtrack.manager.FlightPlanManager
 import juricabi.com.groundtrack.protocol.GhstProtocol
 import juricabi.com.groundtrack.manager.Fr24Manager
@@ -489,6 +492,10 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
         ) = this@MapsActivity.onFlyModeData(armed, heading, firstFlightMode, secondFlightMode)
         override fun onProtocolDetected(protocolName: String) =
             this@MapsActivity.onProtocolDetected(protocolName)
+        // the service has kept it already; the tab and an open history catch up
+        override fun onStatusText(message: String, severity: Int) {
+            runOnUiThread { if (!isInReplayMode()) messageHistory.refresh() }
+        }
         override fun commit() = this@MapsActivity.commit()
     }
 
@@ -555,6 +562,7 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
 
     /** The telemetry readouts, whole: tiles, formatting, icons, greying. */
     private lateinit var telemetryPanel: TelemetryPanel
+    private lateinit var messageHistory: MessageHistory
 
     /** The live picture and everything that owns it — see VideoPane. */
     private lateinit var videoPane: VideoPane
@@ -582,6 +590,13 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
             replaying = { logPlayer != null },
             linkProtocol = { detectedProtocol }
         )
+        messageHistory = MessageHistory(
+            this, ::showDialog,
+            rows = { if (isInReplayMode()) replayMessageRows() else FlightMessages.rows() },
+            jump = { if (isInReplayMode()) ::jumpToMessage else null }
+        )
+        // a screen rebuilt mid-flight: the service kept the messages meanwhile
+        messageHistory.refresh()
         connectFlow = ConnectFlow(this, preferenceManager)
         supportPrompt = SupportPrompt(this, preferenceManager, ::showDialog) {
             dataService?.isConnected() == true || reconnectOnFailure
@@ -1105,7 +1120,63 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
      * counted measure time passed well enough: exact at both ends of the flight
      * and within a few seconds between them.
      */
-    private fun replayTimeNow(): Date? {
+    private fun replayTimeNow(): Date? = replayTimeAt(logPlayer?.currentPosition ?: 0)
+
+    /**
+     * The replay's message line and history, where it stands: the message it
+     * has just passed, for as long as the live screen holds one — ten seconds
+     * of the flight, counted from the message itself, so a scrub or a rewind
+     * that lands just after one shows it as playing over it would.
+     */
+    private fun showReplayMessages() {
+        val player = logPlayer ?: return
+        val position = player.currentPosition
+        val last = player.messagesBefore(position).lastOrNull()
+        telemetryPanel.showReplayStatusText(last?.takeIf {
+            flightMsBetween(it.index + 1, position) < SensorTimeoutManager.DEFAULT_TIMEOUT_MS
+        }?.text)
+        messageHistory.refresh()
+    }
+
+    // what replayMessageRows built last, and from what: rebuilt only when the
+    // replay passes another message or its clock arrives, not every tick
+    private var replayRowsKey: Triple<LogPlayer, Int, OperatorTrack?>? = null
+    private var replayRows: List<Message> = emptyList()
+
+    /** The replay's messages up to where it stands, folded as the live ones are. */
+    private fun replayMessageRows(): List<Message> {
+        val player = logPlayer ?: return emptyList()
+        val said = player.messagesBefore(player.currentPosition)
+        val key = Triple(player, said.size, operatorTrack)
+        if (key != replayRowsKey) {
+            val rows = MessageRows()
+            for (m in said) rows.add(m.text, m.severity, replayTimeAt(m.index + 1)?.time, m.index)
+            replayRows = rows.rows()
+            replayRowsKey = key
+        }
+        return replayRows
+    }
+
+    /** A history row tapped in a replay: the replay goes to where it was first said. */
+    private fun jumpToMessage(message: Message) {
+        if (logPlayer == null || message.firstIndex < 0) return
+        // the bar is the replay's one way to be moved: it seeks, and the
+        // clock, the operator and the line follow as they do for a drag
+        seekBar.progress = message.firstIndex + 1
+    }
+
+    /** How much of the flight lies between two places in its recording, by its clock when it kept one. */
+    private fun flightMsBetween(from: Int, to: Int): Long {
+        val a = replayTimeAt(from)
+        val b = replayTimeAt(to)
+        if (a != null && b != null) return b.time - a.time
+        val packets = logPlayer?.packetCount() ?: 0
+        if (packets <= 0) return 0
+        return (realFlightSeconds() * 1000 * (to - from) / packets).toLong()
+    }
+
+    /** The recorded time a replay standing at [position] shows, or null with no clock recorded. */
+    private fun replayTimeAt(position: Int): Date? {
         val track = operatorTrack ?: return null
         // Where the replay has got to in the recording, looked up in the CSV,
         // which was written on a clock. Packets counted would do only if the
@@ -1118,14 +1189,14 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
             // is the one before. Reading the next one's place in the recording
             // told the time on the far side of a link outage while the model
             // was still sitting on the near side of it.
-            track.timeAtMark(player.bytesAt(player.currentPosition - 1))?.let { return Date(it) }
+            track.timeAtMark(player.bytesAt(position - 1))?.let { return Date(it) }
         }
         // an older recording, with no marks in it: spread evenly, as before
         val span = track.endedAt - track.startedAt
         if (span <= 0L) return Date(track.startedAt)
         val total = seekBar.max
         if (total <= 0) return Date(track.startedAt)
-        val at = (logPlayer?.currentPosition ?: 0).toFloat() / total
+        val at = position.toFloat() / total
         val part = Math.max(0f, Math.min(1f, at))
         return Date(track.startedAt + (span * part).toLong())
     }
@@ -1150,6 +1221,8 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
                 operatorTrack = track
                 showTime()
                 showOperator()
+                // the messages' times, and how long ago the line's was said
+                if (isInReplayMode()) showReplayMessages()
                 // A replay started before this arrived was running to a length
                 // estimated from its packets. Now that the recording's own
                 // clock is here, it runs to that. Not one at its end, though:
@@ -2004,6 +2077,9 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
         // somewhere" with no plane on the sky
         modelHeadingKnown = false
         juricabi.com.groundtrack.gl.LiveFlightPath.clear()
+        // and what it said, with it
+        FlightMessages.clear()
+        messageHistory.refresh()
         // and anything gathered towards drawing it, wherever the forgetting
         // came from: a rewind, a new link, or leaving the replay altogether
         gatheredPoints.clear()
@@ -3126,6 +3202,8 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
 
     private fun switchToReplayMode() {
         stopFr24(clear = true)
+        // the history is the recording's from here on
+        messageHistory.refresh()
         // A replay opens in whatever mode is selected — a flight's armed mode
         // takes hold from its first point, the way a live link's does. Forcing
         // follow here overrode a chosen chase, and it never told the 3D view,
@@ -3166,6 +3244,8 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
     internal fun switchToIdleState() {
         this.logPlayer?.dispose();
         this.logPlayer = null;
+        // out of a replay: the history is the live flight's again
+        messageHistory.refresh()
         // out of the replay, so the sky is worth watching again
         startFr24()
         showMyLocation()
@@ -3442,6 +3522,8 @@ class MapsActivity : androidx.appcompat.app.AppCompatActivity(), Fr24Manager.Lis
         runOnUiThread {
             drawGathered()
             commitRouteLinePoints()
+            // a replay's seek ends here, and its messages are where it stands
+            if (isInReplayMode()) showReplayMessages()
         }
     }
 

@@ -361,11 +361,22 @@ class TelemetryPanel(
         }
     }
 
-    override fun onStatusText(message: String) {
-        sensorTimeoutManager.onStatusText(message)
+    override fun onStatusText(message: String, severity: Int) {
+        // A replay's line is set from the recording at the end of each seek
+        // (showReplayStatusText): a seek hands on only the last message of
+        // the stretch it walked, and on a rewind not always in step with it.
+        if (replaying()) return
+        sensorTimeoutManager.onStatusText(message, severity)
         activity.runOnUiThread {
+            // decoded before the link went and posted after, as onGPSState
+            if (idle()) return@runOnUiThread
             statustext.text = message
         }
+    }
+
+    /** The replay's line: the message the playhead has just passed, or none. */
+    fun showReplayStatusText(text: String?) {
+        statustext.text = text ?: ""
     }
 
     override fun onGPSState(satellites: Int, gpsFix: Boolean) {

@@ -439,13 +439,7 @@ https://github.com/iNavFlight/inav/blob/135456936834ab4129e6ed540038b2e88dcb3c44
                 ardu.attitude(data.data, wanted = !nativeAttitude.fresh())
             }
             Protocol.STATUSTEXT -> {
-                if (data.rawData != null) {
-                    val terminator = data.rawData.indexOfFirst { it == 0.toByte() }
-                    val end = if (terminator > 0) terminator else data.rawData.size
-                    if (end > 1) {
-                        listener.onStatusText(String(data.rawData, 1, end - 1))
-                    }
-                }
+                statusTextOf(data)?.let { (text, severity) -> listener.onStatusText(text, severity) }
             }
             Protocol.GPS_ACCURACY_CM -> {
                 listener.onGPSPrecisionData(GpsPrecision.Metres(data.data / 100f))

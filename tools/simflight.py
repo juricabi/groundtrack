@@ -14,7 +14,10 @@ Two additions ride on the same flight model:
 
     --passthrough          weave ArduPilot passthrough words (0x80 frames,
                            appids 0x5001-0x5006 plus status text) into the
-                           CRSF stream, the way ArduPilot over ELRS does
+                           CRSF stream, the way ArduPilot over ELRS does;
+                           the text is a line every 5 s and, every 20 s, a
+                           burst of failed checks at mixed severities, so the
+                           message history shows its colours and its folding
     --protocol mavlink-hl  send MAVLink HIGH_LATENCY2 instead of CRSF: one
                            42-byte message every --hl-period seconds, which
                            is the whole of what a satellite link carries
@@ -231,6 +234,14 @@ def ap_multi_frame(tuples):
     for appid, word in tuples:
         payload += struct.pack("<HI", appid, word & 0xFFFFFFFF)
     return frame(AP_CUSTOM, payload)
+
+
+# MAV_SEVERITY: 2 critical, 4 warning, 6 info
+PREARM_BURST = [
+    (2, "PreArm: Throttle below failsafe"),
+    (4, "PreArm: Battery below minimum arming voltage"),
+    (6, "EKF3 IMU0 is using GPS"),
+]
 
 
 def ap_text_frame(severity, text):
@@ -574,7 +585,7 @@ def main():
     started = 0.0 if dump is not None else time.time()
     ticks = 0
     last = {"gps": 0.0, "battery": 0.0, "link": 0.0, "mode": 0.0, "info": 0.0,
-            "pass": 0.0, "multi": 0.0, "text": 0.0, "hl": -1e9}
+            "pass": 0.0, "multi": 0.0, "text": 0.0, "burst": 0.0, "hl": -1e9}
     previous = None
     used_mah = 0.0
     passthrough_turn = 0
@@ -788,6 +799,12 @@ def main():
             if now - last["text"] >= 5.0:
                 last["text"] = now
                 send(ap_text_frame(6, "SimFlight passthrough alive"))
+            if now - last["burst"] >= 20.0:
+                last["burst"] = now
+                # what an autopilot that will not arm says, every check it
+                # fails together, again and again
+                for severity, text in PREARM_BURST:
+                    send(ap_text_frame(severity, text))
 
         if dump is None:
             time.sleep(0.04)

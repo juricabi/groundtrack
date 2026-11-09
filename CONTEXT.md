@@ -18,6 +18,18 @@ issues and reviews use these terms as written here.
   whole: every tile on the two bars, formatting, icons, timeout greying, the
   cell-count question, the CRSF rate system. One adapter at the
   decoder-listener seam; the activity forwards display-only callbacks here.
+- **Messages** — what the autopilot says: MAVLink's STATUSTEXT, carried as
+  `onStatusText(message, severity)` on the bus, severity MAVLink's 0-7.
+  `statusTextOf` (`decoder/DataDecoder.kt`) cuts one the same way for every
+  link. A flight's are `MessageRows` (`service/FlightMessages.kt`), a repeat
+  within a burst folded into its row; the live flight's are `FlightMessages`,
+  kept by the process and fed by DataService before any ear hears them, and
+  forgotten with the flight in `forgetFlight()`; a replay's are the
+  recording's, `LogPlayer.messages()`, shown up to the playhead.
+- **MessageHistory** (`ui/MessageHistory.kt`) — the flight's messages behind
+  the tab at the start of the message line: the tab itself, shown only while
+  there are any, and the history it opens. The line is TelemetryPanel's live,
+  and the activity's in a replay, set from the recording at each seek's end.
 - **VideoPane** (`ui/VideoPane.kt`) — the live picture and everything that
   owns it: the wish to watch, the stale-events generation, the retry that
   keeps the card standing, the split, the permission choreography, the
@@ -91,6 +103,8 @@ issues and reviews use these terms as written here.
 - **The probe pattern** — a recording is asked questions through a decoder of
   its own (`LogPlayer.firstPosition`, `walkWholeLog`), never through the live
   one: the live decoder fires every reading at the screen and moves the replay.
+  Its messages are read off its cached readings by `statusTextOf` directly
+  (`LogPlayer.messages`), the very cut the decoders make.
 - **The store** — the one `"settings"` SharedPreferences file. Its name and
   the keys watched from outside live only in `PreferenceManager` (`STORE`,
   `KEY_*`).

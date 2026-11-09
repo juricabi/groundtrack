@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dark backing of the picture's own controls, as a pill for a word -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+        android:shape="rectangle">
+    <solid android:color="#66000000"/>
+    <corners android:radius="12dp"/>
+</shape>

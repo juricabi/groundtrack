@@ -277,7 +277,7 @@ class SensorTimeoutManager(protected val listener: SensorTimeoutManager.Listener
         this.onSensorData(SensorTimeoutManager.SENSOR_RC_CHANNELS);
     }
 
-    override fun onStatusText(message: String){
+    override fun onStatusText(message: String, severity: Int) {
         this.onSensorData(SensorTimeoutManager.SENSOR_STATUSTEXT);
     }
 

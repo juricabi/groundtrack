@@ -245,11 +245,7 @@ class MAVLinkDataDecoder(listener: Listener) : DataDecoder(listener) {
                 }
             }
             Protocol.STATUSTEXT -> {
-                if (data.rawData !=null) {
-                    val byteBuffer = data.rawData.sliceArray( 1..50 )
-                    val message = String( byteBuffer )
-                    listener.onStatusText(message)
-                }
+                statusTextOf(data)?.let { (text, severity) -> listener.onStatusText(text, severity) }
             }
             Protocol.HIGH_LATENCY -> {
                 // HIGH_LATENCY2, all of it. One of these per five seconds is

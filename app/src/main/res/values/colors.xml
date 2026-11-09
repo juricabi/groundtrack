@@ -15,4 +15,8 @@
     <color name="colorPosArrowLogged">#FFFF9E22</color>
     <!-- The amber the settings screen already warns in (PrefsFragment 0xFFF9A825). -->
     <color name="colorWarning">#FFF9A825</color>
+    <!-- A message's severity in the history, each 4.5:1 or better on its
+         theme's dialog: white by day, the dark floating grey by night. -->
+    <color name="messageError">#FFC62828</color>
+    <color name="messageWarning">#FFB45309</color>
 </resources>

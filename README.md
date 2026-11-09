@@ -45,6 +45,12 @@ before opening it.
   you, as a plus code, a route in your maps app or a message to share.
 - Flight plans from CSV (one `latitude,longitude` per line); nearby aircraft
   from FlightRadar24 with spoken warnings ([opt-in](#nearby-aircraft)).
+- **Messages**: everything the autopilot says (MAVLink status text, and the
+  same over ArduPilot passthrough on CRSF) — the latest above the flight mode,
+  and the whole flight's behind the small *messages* tab beside it: newest
+  first, timed, coloured and named by severity, repeats folded. In a replay
+  it is the flight's up to where the replay stands, and a tap on one goes
+  there.
 
 **Recording and replay**
 - Every flight is logged, raw (`.tlm`) and as OpenTX CSV — with the screen

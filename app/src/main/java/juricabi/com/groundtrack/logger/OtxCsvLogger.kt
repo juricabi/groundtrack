@@ -143,7 +143,6 @@ class OtxCsvLogger(
     private var armed: Boolean = false
     private var airSpeed: Float = 0F
     private var rcChannels: IntArray? = null
-    private var statusText: String = ""
     private var dnSnr: Int = 0
     private var upSnr: Int = 0
     private var activeAntenna: Int = 0
@@ -367,9 +366,8 @@ class OtxCsvLogger(
         // not yet implemented
     }
 
-    override fun onStatusText(message: String) {
-        this.statusText=message
-    }
+    // the CSV has no column for it; the recording keeps it, in the .tlm
+    override fun onStatusText(message: String, severity: Int) {}
 
     override fun onDNSNRData(snr: Int) {
         this.dnSnr=snr

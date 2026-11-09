@@ -101,6 +101,25 @@ class TelemetryPanelTest {
     }
 
     @Test
+    fun aLiveMessageLandsOnTheLine() {
+        val (host, panel) = build()
+        panel.onStatusText("EKF3 IMU0 is using GPS", 6)
+        assertEquals("EKF3 IMU0 is using GPS", host.findViewById<TextView>(R.id.statustext).text)
+    }
+
+    @Test
+    fun aReplaysLineIsTheRecordingsNotTheBuses() {
+        val (host, panel) = build(replaying = true)
+        val line = host.findViewById<TextView>(R.id.statustext)
+        panel.showReplayStatusText("PreArm: GPS not healthy")
+        // the last message a seek happened to hand on does not overwrite it
+        panel.onStatusText("Battery 1 low", 4)
+        assertEquals("PreArm: GPS not healthy", line.text)
+        panel.showReplayStatusText(null)
+        assertEquals("", line.text)
+    }
+
+    @Test
     fun resetPutsEveryTileBackToItsRestingFace() {
         val (host, panel) = build()
         panel.onGSpeedData(72.4f)
