@@ -345,11 +345,15 @@ class UsbUvcSource(
     // its sound is a USB input the OS guards with the microphone permission
     override val needsRecordAudio get() = true
 
-    @Volatile private var audioRunning = false
+    // Each audio thread's own switch, on the UI thread's side. A thread whose
+    // join timed out still holds its old one, switched off: a shared flag let
+    // it back in at the next start, and two threads fed the speaker and the
+    // recording at once.
+    private var audioRunning: java.util.concurrent.atomic.AtomicBoolean? = null
     private var audioThread: Thread? = null
 
     override fun setAudio(on: Boolean) {
-        if (on == audioRunning) return
+        if (on == (audioRunning?.get() == true)) return
         if (on) {
             val input = usbAudioInput() ?: return events.onAudioLost()
             // the screen asks first, but a race or a revoke could still land
@@ -357,16 +361,18 @@ class UsbUvcSource(
             if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
             ) return events.onAudioLost()
-            audioRunning = true
-            audioThread = Thread({ pumpAudio(input) }, "uvc-audio").also { it.start() }
+            val running = java.util.concurrent.atomic.AtomicBoolean(true)
+            audioRunning = running
+            audioThread = Thread({ pumpAudio(input, running) }, "uvc-audio").also { it.start() }
         } else {
-            audioRunning = false
+            audioRunning?.set(false)
+            audioRunning = null
             audioThread?.join(500)
             audioThread = null
         }
     }
 
-    private fun pumpAudio(input: AudioDeviceInfo) {
+    private fun pumpAudio(input: AudioDeviceInfo, running: java.util.concurrent.atomic.AtomicBoolean) {
         // 48 kHz mono 16-bit — what these receivers speak, and what a phone
         // decodes without complaint; a mismatch AudioRecord resamples itself.
         val rate = 48000
@@ -375,7 +381,7 @@ class UsbUvcSource(
         val outMin = AudioTrack.getMinBufferSize(
             rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (inMin <= 0 || outMin <= 0) {
-            audioRunning = false
+            running.set(false)
             return events.onAudioLost()
         }
         var record: AudioRecord? = null
@@ -404,7 +410,7 @@ class UsbUvcSource(
                 .setBufferSizeInBytes(outMin * 2)
                 .build()
             if (record.state != AudioRecord.STATE_INITIALIZED) {
-                audioRunning = false
+                running.set(false)
                 return events.onAudioLost()
             }
             record.startRecording()
@@ -412,11 +418,27 @@ class UsbUvcSource(
             DebugLog.note("Video", "uvc audio up from ${input.productName}")
             val buf = ByteArray(inMin)
             val clock = SampleClock(rate)
-            while (audioRunning) {
+            var routeCheckedUs = 0L
+            while (running.get()) {
                 val n = record.read(buf, 0, buf.size)
                 if (n > 0) {
                     // stamped as read, ahead of the write, which may wait on the speaker
                     val heardUs = clock.stamp(n / 2, android.os.SystemClock.elapsedRealtimeNanos() / 1000)
+                    // An input whose device goes is not ended but rerouted, to
+                    // the phone's own microphone — the reads carry on, and the
+                    // field around the pilot would go to the speaker and into
+                    // the recording. Asked twice a second: it costs a lookup.
+                    if (heardUs - routeCheckedUs >= 500_000) {
+                        routeCheckedUs = heardUs
+                        val routed = record.routedDevice
+                        if (routed != null && routed.type != AudioDeviceInfo.TYPE_USB_DEVICE &&
+                            routed.type != AudioDeviceInfo.TYPE_USB_HEADSET
+                        ) {
+                            DebugLog.note("Video", "uvc audio rerouted to ${routed.productName} type=${routed.type}")
+                            if (running.get()) events.onAudioLost()
+                            break
+                        }
+                    }
                     track.write(buf, 0, n)
                     sound.pcm(java.nio.ByteBuffer.wrap(buf, 0, n), rate, 1, heardUs, recordSink)
                 } else if (n < 0) {
@@ -425,15 +447,15 @@ class UsbUvcSource(
                     // ends the read the same way and must not toast. onAudioLost
                     // dims the button that would otherwise still claim sound.
                     DebugLog.note("Video", "uvc audio read ended ($n)")
-                    if (audioRunning) events.onAudioLost()
+                    if (running.get()) events.onAudioLost()
                     break
                 }
             }
         } catch (e: Exception) {
             DebugLog.note("Video", "uvc audio failed: ${e.message}")
-            if (audioRunning) events.onAudioLost()
+            if (running.get()) events.onAudioLost()
         } finally {
-            audioRunning = false
+            running.set(false)
             try { record?.stop() } catch (e: Exception) {}
             record?.release()
             try { track?.stop() } catch (e: Exception) {}

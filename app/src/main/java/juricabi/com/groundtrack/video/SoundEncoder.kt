@@ -176,3 +176,32 @@ internal fun adts(config: ByteArray, frame: ByteArray): ByteArray {
         0xFC.toByte() // buffer fullness 0x7FF: variable rate; one raw block
     ) + frame
 }
+
+/** The AudioSpecificConfig an ADTS header was built from: its object type, rate index and channels. */
+internal fun configOf(adts: ByteArray): ByteArray {
+    val objectType = ((adts[2].toInt() and 0xFF) shr 6) + 1
+    val rateIndex = (adts[2].toInt() shr 2) and 0x0F
+    val channels = ((adts[2].toInt() and 0x01) shl 2) or ((adts[3].toInt() and 0xFF) shr 6)
+    return byteArrayOf(
+        ((objectType shl 3) or (rateIndex shr 1)).toByte(),
+        (((rateIndex and 1) shl 7) or (channels shl 3)).toByte()
+    )
+}
+
+/**
+ * One frame of silence in [config]'s form, mono or stereo — the two the
+ * recording takes. The frames are the ones hls.js pads gaps with, so they
+ * are known to decode on the phones' own AAC decoders.
+ */
+internal fun silence(config: ByteArray): ByteArray =
+    adts(config, if (((config[1].toInt() and 0xFF) shr 3) and 0x0F == 1) SILENT_MONO else SILENT_STEREO)
+
+/** How long one frame of [config] lasts in µs: 1024 samples at its rate. */
+internal fun frameUs(config: ByteArray): Long {
+    val rateIndex = ((config[0].toInt() and 0x07) shl 1) or ((config[1].toInt() and 0xFF) shr 7)
+    return 1024 * 1_000_000L / RATES[rateIndex]
+}
+
+private val RATES = intArrayOf(96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
+private val SILENT_MONO = byteArrayOf(0x00, 0xC8.toByte(), 0x00, 0x80.toByte(), 0x23, 0x80.toByte())
+private val SILENT_STEREO = byteArrayOf(0x21, 0x00, 0x49, 0x90.toByte(), 0x02, 0x19, 0x00, 0x23, 0x80.toByte())

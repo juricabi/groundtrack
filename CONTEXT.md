@@ -38,7 +38,8 @@ issues and reviews use these terms as written here.
   — PCM either way: USB's off the receiver's audio input, RTSP's as the player
   hands it to the speaker. The recorder writes on a thread of its own;
   `RecordingClock` lays every run of a stream on one timeline, the sound riding
-  the picture's, and a rebuilt screen appends to the same file.
+  the picture's and its gaps filled with silence, and a rebuilt screen appends
+  to the same file.
 - **PhoneWatcher** (`service/PhoneWatcher.kt`) — where the phone is and which
   way it faces: sensing, fix arbitration (`worthBelieving`), the background
   compass wake lock. What is written down stays with the service.

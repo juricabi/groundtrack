@@ -43,7 +43,8 @@ interface RecordSink {
  *
  * The sound rides the picture's runs: it is stamped on the same source clock,
  * so the picture's offset places it too, and it waits for the picture to pin
- * each run before it is written.
+ * each run before it is written. Once a file has sound it keeps it to the
+ * end: a stretch the sound leaves empty is filled with silence ([silence]).
  */
 internal class RecordingClock(private val startedAtUs: Long) {
     private var lastStreamUs: Long? = null
@@ -65,7 +66,8 @@ internal class RecordingClock(private val startedAtUs: Long) {
      * A sound frame's time from the recording's start in µs, or null to skip
      * it: before the picture has pinned the run it belongs to, from a stretch
      * of the clock the picture is not on (an old run's last frames, queued
-     * behind the new one's keyframe), or not after the sound already written.
+     * behind the new one's keyframe), or not after the sound already written
+     * — which, in a file just begun, is its first picture.
      */
     fun placeSound(streamUs: Long): Long? {
         val last = lastStreamUs ?: return null
@@ -74,6 +76,20 @@ internal class RecordingClock(private val startedAtUs: Long) {
         if (t <= lastSoundUs) return null
         lastSoundUs = t
         return t
+    }
+
+    /**
+     * The time for a frame of silence [frameUs] long, or null when none is
+     * due: the sound has fallen more than a second behind the picture at
+     * [pictureUs] — turned off, lost, or not yet back after a rebuilt screen.
+     * ExoPlayer holds a file at the last frame of any stream it was told of,
+     * so a sound that stopped would freeze the picture there too.
+     */
+    fun silence(pictureUs: Long, frameUs: Long): Long? {
+        val next = lastSoundUs + frameUs
+        if (lastSoundUs == Long.MIN_VALUE || next > pictureUs - SILENCE_LAG_US) return null
+        lastSoundUs = next
+        return next
     }
 
     /** Frames went missing on the way here; carry on from the next keyframe. */
@@ -106,6 +122,8 @@ internal class RecordingClock(private val startedAtUs: Long) {
         // never backwards within a run either
         val t = maxOf(streamUs + offsetUs, lastUs + 1_000)
         lastUs = t
+        // a new file's sound begins with its picture, not before it
+        if (lastSoundUs == Long.MIN_VALUE) lastSoundUs = t - 1
         return t
     }
 
@@ -115,6 +133,7 @@ internal class RecordingClock(private val startedAtUs: Long) {
     private companion object {
         const val MAX_STEP_US = 2_000_000L
         const val FRAME_US = 40_000L
+        const val SILENCE_LAG_US = 1_000_000L
     }
 }
 
@@ -138,14 +157,16 @@ class StreamRecorder(
     private val minFreeBytes: Long = 200L shl 20
 ) : RecordSink {
 
+    private open class Item(val data: ByteArray)
+
     private class Frame(
-        val codec: RtpCodec, val data: ByteArray, val streamUs: Long, val key: Boolean,
+        val codec: RtpCodec, data: ByteArray, val streamUs: Long, val key: Boolean,
         val parameterSets: List<ByteArray>, val arrivalUs: Long,
         /** Frames were dropped just before this one; the timeline resumes at a keyframe. */
         val afterGap: Boolean
-    )
+    ) : Item(data)
 
-    private class Sound(val data: ByteArray, val streamUs: Long)
+    private class Sound(data: ByteArray, val streamUs: Long) : Item(data)
 
     private val queue = LinkedBlockingQueue<Any>()
     private val queuedBytes = AtomicLong()
@@ -153,6 +174,8 @@ class StreamRecorder(
     @Volatile private var dropped = false
     @Volatile private var endedBy: String? = null
     private val clock = RecordingClock(startedAtUs)
+    // the writer's own: the form of the file's sound, once it has any
+    private var soundConfig: ByteArray? = null
 
     init {
         Thread({ write() }, "stream-record").start()
@@ -205,39 +228,69 @@ class StreamRecorder(
                 if (append) carryOn()
                 BufferedOutputStream(FileOutputStream(file, append), 1 shl 18).use { out ->
                     val muxer = TsMuxer(out)
+                    // a file appended to that has sound keeps it from the start
+                    if (soundConfig != null) muxer.withSound()
+                    fun declare(sound: Sound) {
+                        if (soundConfig != null) return
+                        soundConfig = configOf(sound.data)
+                        muxer.withSound()
+                    }
+                    fun take(item: Item) {
+                        when (item) {
+                            is Frame -> {
+                                if (item.afterGap) {
+                                    clock.lost()
+                                    DebugLog.note("Video", "record fell behind, frames dropped")
+                                }
+                                val t = clock.place(item.streamUs, item.arrivalUs, item.key) ?: return
+                                muxer.frame(
+                                    item.codec, item.data, t * 9 / 100, item.key,
+                                    item.parameterSets, clock.tookDiscontinuity()
+                                )
+                                val config = soundConfig ?: return
+                                while (true) {
+                                    val at = clock.silence(t, frameUs(config)) ?: break
+                                    muxer.sound(silence(config), at * 9 / 100)
+                                }
+                            }
+                            is Sound -> {
+                                declare(item)
+                                clock.placeSound(item.streamUs)?.let { muxer.sound(item.data, it * 9 / 100) }
+                            }
+                        }
+                    }
+                    // The picture's first keyframe brings the file's first
+                    // tables, and those are the only ones some players read:
+                    // ExoPlayer takes a file's first stream list as final. So
+                    // until the first sound or a second has come, the writer
+                    // looks ahead before writing, and sound seen by then is in
+                    // them — the keyframe often reaches here first.
+                    var held: ArrayList<Item>? = if (soundConfig == null) ArrayList() else null
+                    var heldSince = 0L
                     var lastFlush = clockUs()
                     // due at once: a recording must not start onto a full card
                     var lastSpaceCheck = lastFlush - 10_000_000
                     while (true) {
                         val next = queue.poll(1, TimeUnit.SECONDS)
-                        if (next === CLOSE) break
-                        when (next) {
-                            is Frame -> {
-                                queuedBytes.addAndGet(-next.data.size.toLong())
-                                if (next.afterGap) {
-                                    clock.lost()
-                                    DebugLog.note("Video", "record fell behind, frames dropped")
-                                }
-                                val t = clock.place(next.streamUs, next.arrivalUs, next.key)
-                                if (t != null) {
-                                    muxer.frame(
-                                        next.codec, next.data, t * 9 / 100, next.key,
-                                        next.parameterSets, clock.tookDiscontinuity()
-                                    )
-                                }
+                        if (next is Item) queuedBytes.addAndGet(-next.data.size.toLong())
+                        val looking = held
+                        if (looking == null) {
+                            if (next is Item) take(next)
+                        } else {
+                            if (next is Item) {
+                                if (looking.isEmpty()) heldSince = clockUs()
+                                looking += next
                             }
-                            is Sound -> {
-                                queuedBytes.addAndGet(-next.data.size.toLong())
-                                // Declared on sight, before the run is pinned
-                                // and the frame can be placed: the sound usually
-                                // beats the first keyframe here, and the tables
-                                // that go out with that keyframe are the only
-                                // ones some players ever read — ExoPlayer takes
-                                // a file's first stream list as final.
-                                muxer.withSound()
-                                clock.placeSound(next.streamUs)?.let { muxer.sound(next.data, it * 9 / 100) }
+                            if (next is Sound || next === CLOSE ||
+                                looking.isNotEmpty() && clockUs() - heldSince >= LOOK_AHEAD_US
+                            ) {
+                                held = null
+                                // declared ahead of the keyframe it may follow
+                                (next as? Sound)?.let(::declare)
+                                looking.forEach(::take)
                             }
                         }
+                        if (next === CLOSE) break
                         val now = clockUs()
                         // written through each second, so a kill loses at most that
                         if (now - lastFlush >= 1_000_000) {
@@ -272,7 +325,8 @@ class StreamRecorder(
     /**
      * Before appending: a kill can leave half a packet at the end, and every
      * packet written after it would be misaligned — so the file is cut back
-     * to whole packets, and the clock told where the file's time stands.
+     * to whole packets, the clock told where the file's time stands, and the
+     * recorder whether the file has sound, which it then keeps.
      */
     private fun carryOn() {
         if (!file.isFile) return
@@ -285,6 +339,7 @@ class StreamRecorder(
             f.seek(whole - tail.size)
             f.readFully(tail)
             lastTime90k(tail)?.let { clock.notBefore(it * 100 / 9) }
+            soundConfig = lastSoundHeader(tail)?.let(::configOf)
         }
     }
 
@@ -293,5 +348,6 @@ class StreamRecorder(
         val ONE_WRITER = Any()
         // about six seconds of a 20 Mbit/s goggle stream
         const val MAX_QUEUED = 16L shl 20
+        const val LOOK_AHEAD_US = 1_000_000L
     }
 }

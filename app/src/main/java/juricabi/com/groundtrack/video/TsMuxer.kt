@@ -276,29 +276,47 @@ private fun nalUnits(codec: RtpCodec, annexB: ByteArray): List<Pair<Int, Int>> {
 
 /**
  * Where a transport stream already on disk left off, on its 90 kHz clock: the
- * latest picture in its tail, or null when it holds none. A recording that
- * appends carries on from here, so time never steps back across the join —
- * whatever clock placed the frames before.
+ * latest picture or sound in its tail, or null when it holds neither. A
+ * recording that appends carries on from here, so time never steps back
+ * across the join — whatever clock placed the frames before. The sound is
+ * counted too: it can run a little past the last picture.
  */
-internal fun lastTime90k(tail: ByteArray): Long? {
-    var latest: Long? = null
+internal fun lastTime90k(tail: ByteArray): Long? = pesStarts(tail)
+    .filter { (it.pid == TsMuxer.VIDEO_PID || it.pid == TsMuxer.SOUND_PID) && it.pes + 14 <= it.end }
+    .filter { tail[it.pes + 7].toInt() and 0x80 != 0 }
+    .maxOfOrNull {
+        val b = { k: Int -> tail[it.pes + 9 + k].toLong() and 0xFF }
+        val pts = ((b(0) shr 1 and 0x07) shl 30) or (b(1) shl 22) or ((b(2) shr 1) shl 15) or
+            (b(3) shl 7) or (b(4) shr 1)
+        pts - TsMuxer.PTS_LEAD
+    }
+
+/**
+ * The ADTS header of the last sound frame in a stream's tail, or null when
+ * it holds no sound: a file that has sound keeps it across an append, in the
+ * same form.
+ */
+internal fun lastSoundHeader(tail: ByteArray): ByteArray? = pesStarts(tail)
+    .filter { it.pid == TsMuxer.SOUND_PID && it.pes + 9 <= it.end }
+    .firstNotNullOfOrNull {
+        val adts = it.pes + 9 + (tail[it.pes + 8].toInt() and 0xFF)
+        if (adts + 7 <= it.end && tail[adts].toInt() and 0xFF == 0xFF) tail.copyOfRange(adts, adts + 7) else null
+    }
+
+/** Where a PES begins in a stream's tail: its PID, its header, and the end of the packet holding it. */
+private class PesStart(val pid: Int, val pes: Int, val end: Int)
+
+/** Every PES start in a stream's tail, the last first. */
+private fun pesStarts(tail: ByteArray): Sequence<PesStart> = sequence {
     var at = tail.size - tail.size % TsMuxer.PACKET
     while (at >= TsMuxer.PACKET) {
         at -= TsMuxer.PACKET
         val p = at
-        if (tail[p].toInt() != 0x47) continue
-        val pid = (tail[p + 1].toInt() and 0x1F shl 8) or (tail[p + 2].toInt() and 0xFF)
-        if (pid != TsMuxer.VIDEO_PID || tail[p + 1].toInt() and 0x40 == 0) continue
+        if (tail[p].toInt() != 0x47 || tail[p + 1].toInt() and 0x40 == 0) continue
         var pes = p + 4
         if (tail[p + 3].toInt() and 0x20 != 0) pes += 1 + (tail[p + 4].toInt() and 0xFF)
-        if (pes + 14 > p + TsMuxer.PACKET || tail[pes + 7].toInt() and 0x80 == 0) continue
-        val b = { k: Int -> tail[pes + 9 + k].toLong() and 0xFF }
-        val pts = ((b(0) shr 1 and 0x07) shl 30) or (b(1) shl 22) or ((b(2) shr 1) shl 15) or
-            (b(3) shl 7) or (b(4) shr 1)
-        val time = pts - TsMuxer.PTS_LEAD
-        if (latest == null || time > latest) latest = time
+        yield(PesStart((tail[p + 1].toInt() and 0x1F shl 8) or (tail[p + 2].toInt() and 0xFF), pes, p + TsMuxer.PACKET))
     }
-    return latest
 }
 
 /**

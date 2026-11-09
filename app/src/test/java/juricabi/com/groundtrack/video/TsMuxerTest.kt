@@ -229,6 +229,19 @@ class TsMuxerTest {
     }
 
     @Test
+    fun theTailCountsTheSoundAndKeepsItsForm() {
+        val stereo = adts(byteArrayOf(0x12, 0x10), ByteArray(50))
+        val ts = mux {
+            frame(RtpCodec.H264, idr(400), 90_000, true, listOf(sps, pps), false)
+            sound(stereo, 96_500) // a little past the last picture
+            frame(RtpCodec.H264, slice(900), 93_000, false, emptyList(), false)
+        }
+        assertEquals(96_500L, lastTime90k(ts))
+        assertArrayEquals(stereo.copyOf(7), lastSoundHeader(ts))
+        assertEquals(null, lastSoundHeader(mux { frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false) }))
+    }
+
+    @Test
     fun annexBPrefixesOnlyWhatLacksAStartCode() {
         assertArrayEquals(byteArrayOf(0, 0, 0, 1) + sps, annexB(sps))
         val four = byteArrayOf(0, 0, 0, 1) + sps

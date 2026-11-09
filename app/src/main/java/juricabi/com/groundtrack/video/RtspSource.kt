@@ -569,9 +569,11 @@ private class RecordingAudioSink(
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
         // 16-bit PCM is what the decoders hand the speaker; anything else is
-        // left out of the recording rather than written into it as noise
+        // left out of the recording rather than written into it as noise, and
+        // so is surround — the recording's silence comes in mono and stereo
         pcm = inputFormat.takeIf {
-            it.sampleMimeType == MimeTypes.AUDIO_RAW && it.pcmEncoding == C.ENCODING_PCM_16BIT
+            it.sampleMimeType == MimeTypes.AUDIO_RAW && it.pcmEncoding == C.ENCODING_PCM_16BIT &&
+                it.channelCount <= 2
         }
         if (pcm == null) DebugLog.note(
             "Video", "rtsp sound ${inputFormat.sampleMimeType} pcm=${inputFormat.pcmEncoding} cannot be recorded"

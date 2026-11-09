@@ -24,6 +24,22 @@ class AdtsTest {
         assertEquals(1007, length)
         assertEquals(1007, stereo.size)
     }
+
+    @Test
+    fun silenceTakesTheFormOfTheSoundItStandsIn() {
+        val mono = byteArrayOf(0x11, 0x88.toByte())
+        val stereo = byteArrayOf(0x12, 0x10)
+        // the config read back off a header is the one it was built from
+        assertArrayEquals(mono, configOf(adts(mono, ByteArray(9))))
+        assertArrayEquals(stereo, configOf(adts(stereo, ByteArray(9))))
+        assertArrayEquals(adts(mono, ByteArray(0)).copyOf(3), silence(mono).copyOf(3))
+        assertArrayEquals(adts(stereo, ByteArray(0)).copyOf(3), silence(stereo).copyOf(3))
+        assertEquals(7 + 6, silence(mono).size)
+        assertEquals(7 + 9, silence(stereo).size)
+        assertEquals(21_333L, frameUs(mono))
+        assertEquals(23_219L, frameUs(stereo))
+        assertEquals(128_000L, frameUs(byteArrayOf(0x15, 0x88.toByte()))) // 8 kHz
+    }
 }
 
 /** The clock the USB receiver's sound is stamped on, which reads arrive with none of. */
