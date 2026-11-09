@@ -276,13 +276,14 @@ private fun nalUnits(codec: RtpCodec, annexB: ByteArray): List<Pair<Int, Int>> {
 
 /**
  * Where a transport stream already on disk left off, on its 90 kHz clock: the
- * latest picture or sound in its tail, or null when it holds neither. A
- * recording that appends carries on from here, so time never steps back
- * across the join — whatever clock placed the frames before. The sound is
- * counted too: it can run a little past the last picture.
+ * latest picture or sound in its tail — or of [pid] alone — or null when it
+ * holds none. A recording that appends carries on from here, so time never
+ * steps back across the join, whatever clock placed the frames before; and
+ * its sound carries on from where the file's own sound stopped.
  */
-internal fun lastTime90k(tail: ByteArray): Long? = pesStarts(tail)
-    .filter { (it.pid == TsMuxer.VIDEO_PID || it.pid == TsMuxer.SOUND_PID) && it.pes + 14 <= it.end }
+internal fun lastTime90k(tail: ByteArray, pid: Int? = null): Long? = pesStarts(tail)
+    .filter { (pid ?: it.pid) == it.pid && (it.pid == TsMuxer.VIDEO_PID || it.pid == TsMuxer.SOUND_PID) }
+    .filter { it.pes + 14 <= it.end }
     .filter { tail[it.pes + 7].toInt() and 0x80 != 0 }
     .maxOfOrNull {
         val b = { k: Int -> tail[it.pes + 9 + k].toLong() and 0xFF }

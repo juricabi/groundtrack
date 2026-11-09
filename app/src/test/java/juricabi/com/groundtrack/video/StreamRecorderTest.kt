@@ -84,29 +84,91 @@ class RecordingClockTest {
         assertEquals(209_333L, clock.placeSound(42_333))
     }
 
+    // at 16 kHz a frame of sound is exactly 64 ms
+    private val frame16k = 64_000L
+
     @Test
-    fun silenceFillsWhatTheSoundLeavesEmptyASecondBehindThePicture() {
-        val clock = RecordingClock(0)
+    fun silenceCarriesTheSoundASecondBehindThePictureAndLeadsItBackIn() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
         clock.place(0, 0, true)
+        clock.soundFrom(16_000)
         assertEquals(10_000L, clock.placeSound(10_000))
-        // the sound stops; the picture runs on
-        assertNull(clock.silence(pictureUs = 1_000_000, frameUs = 21_000))
-        assertEquals(31_000L, clock.silence(1_031_000, 21_000))
-        assertNull(clock.silence(1_031_000, 21_000))
-        // a picture far ahead brings every frame due, back to back
-        val due = generateSequence { clock.silence(1_200_000, 21_000) }.toList()
-        assertEquals((1..8).map { 31_000L + it * 21_000 }, due)
-        // the sound coming back lands after the silence, never over it
-        assertNull(clock.placeSound(190_000))
-        assertEquals(1_150_000L, clock.placeSound(1_150_000))
+        // the sound stops; the picture runs on, the silence a second behind it
+        clock.place(1_100_000, 1_100_000, false)
+        assertEquals(emptyList<Long>(), silent)
+        clock.place(1_138_000, 1_138_000, false)
+        assertEquals(listOf(10_000 + frame16k), silent)
+        clock.place(1_500_000, 1_500_000, false)
+        assertEquals((1..6).map { 10_000 + it * frame16k }, silent)
+        // the sound coming back is led in by silence up to it, never over it
+        assertEquals(1_200_000L, clock.placeSound(1_200_000))
+        assertEquals((1..17).map { 10_000 + it * frame16k }, silent)
+        assertTrue(1_200_000 - (silent.last() + frame16k) in 0 until frame16k)
     }
 
     @Test
-    fun aFileWithSoundButNoneYetPlacedIsFilledFromItsFirstPicture() {
-        val clock = RecordingClock(0)
-        assertNull(clock.silence(5_000_000, 21_000)) // no picture, no file
-        val first = clock.place(0, 500_000, true)!!
-        assertEquals(first - 1 + 21_000, clock.silence(first + 1_500_000, 21_000))
+    fun aRunKeepsItsSoundToItsLastPictureAndTheNextBeginsWithItsOwn() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
+        clock.place(0, 0, true)
+        clock.soundFrom(16_000)
+        clock.placeSound(10_000)
+        for (k in 1..30) clock.place(k * 100_000L, k * 100_000L, false) // three seconds, silent from the start
+        // a rebuilt player, five seconds on
+        assertEquals(8_000_000L, clock.place(0, 8_000_000, true))
+        // the run that ended has its sound to its last picture, at 3 s...
+        assertTrue(silent.last() + frame16k <= 3_000_000 && silent.last() + 2 * frame16k > 3_000_000)
+        // ...and the gap the picture has too goes without
+        assertTrue(silent.none { it > 3_000_000 })
+        assertNull(clock.placeSound(-5_000)) // from before the new run's picture
+        assertEquals(8_005_000L, clock.placeSound(5_000))
+    }
+
+    @Test
+    fun aSoundThatJoinsLateOwesNoSilenceForTheTimeBefore() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
+        for (k in 0..100) clock.place(k * 100_000L, k * 100_000L, k == 0)
+        clock.soundFrom(16_000)
+        clock.place(10_900_000, 10_900_000, false)
+        assertEquals(emptyList<Long>(), silent)
+        clock.place(11_200_000, 11_200_000, false)
+        assertEquals(listOf(10_000_000 + frame16k, 10_000_000 + 2 * frame16k), silent)
+    }
+
+    @Test
+    fun anAppendedFilesSoundCarriesOnFromWhereItStopped() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
+        // the file's picture ended at 10 s, its sound a second behind it
+        clock.notBefore(10_000_000)
+        clock.soundFrom(16_000, fromUs = 9_000_000)
+        clock.place(0, 12_000_000, true) // the next screen's first frame
+        assertEquals((1..14).map { 9_000_000 + it * frame16k }, silent)
+    }
+
+    @Test
+    fun aClosingRecordingCarriesItsSoundToItsLastPicture() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
+        clock.place(0, 0, true)
+        clock.soundFrom(16_000)
+        clock.placeSound(10_000)
+        clock.place(2_000_000, 2_000_000, false)
+        assertEquals(10_000 + 14 * frame16k, silent.last())
+        clock.finish()
+        assertEquals(10_000 + 30 * frame16k, silent.last())
+    }
+
+    @Test
+    fun silenceIsCountedNotAddedUpSoItKeepsToItsSamples() {
+        val silent = ArrayList<Long>()
+        val clock = RecordingClock(0) { silent += it }
+        clock.place(0, 0, true)
+        clock.soundFrom(44_100) // 23 219.95 µs a frame: no whole number of µs
+        for (k in 1..26) clock.place(k * 1_000_000L, k * 1_000_000L, false)
+        assertEquals(999 * 1024 * 1_000_000L / 44_100, silent[998])
     }
 
     @Test
@@ -119,7 +181,8 @@ class RecordingClockTest {
         assertNull(clock.place(0, 5_000_000, false))
         assertNull(clock.placeSound(10_000))
         clock.place(33_000, 5_033_000, true)
-        assertEquals(5_010_000L, clock.placeSound(10_000))
+        assertNull(clock.placeSound(10_000)) // from before the new run's picture
+        assertEquals(5_040_000L, clock.placeSound(40_000))
     }
 
     @Test
@@ -208,8 +271,12 @@ class StreamRecorderTest {
         assertEquals(1, pmts.size)
         assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts[0]))
         // on the picture's timeline, 90 kHz with the 0.1 s lead: the sound
-        // from stream time 100 ms lands beside the picture's frame from 99.999
-        assertEquals(listOf(18_000L, 19_919L), pes(packets, TsMuxer.SOUND_PID).map(::pts))
+        // from stream time 100 ms lands beside the picture's frame from
+        // 99.999, led in by silence from the first picture, gapless
+        val sounds = pes(packets, TsMuxer.SOUND_PID).map(::pts)
+        assertTrue(sounds.containsAll(listOf(18_000L, 19_919L)))
+        assertTrue(sounds.first() < 9_000 + 2 * 1920)
+        assertTrue(sounds.zipWithNext().all { (a, b) -> b - a in 1919 until 2 * 1920 })
         assertEquals(17_999L, pts(pes(packets)[3]))
     }
 
@@ -251,10 +318,41 @@ class StreamRecorderTest {
             run(30, 150, sound = false) // turned off for four seconds
         }
         val times = soundTimes(file)
-        // never a step but one frame's, and on until a second behind the picture
+        // never a step but one frame's, and on to the last picture as it closes
         assertTrue(times.zipWithNext().all { (a, b) -> b - a in 1919..1920 })
         val lastPicture = pes(packets(file.readBytes())).map(::pts).last()
-        assertTrue(lastPicture - times.last() in 90_000..90_000 + 1920)
+        assertTrue(lastPicture - times.last() in 0..2 * 1920)
+    }
+
+    @Test
+    fun soundThatComesBackIsLedInBySilenceWithoutAHole() {
+        val file = File(folder.root, "unmuted.ts")
+        record(file, append = false) {
+            run(0, 30, sound = true)
+            run(30, 90, sound = false)
+            run(90, 150, sound = true)
+        }
+        // a frame apart throughout; where the sound returns, under two
+        assertTrue(soundTimes(file).zipWithNext().all { (a, b) -> b - a in 1919 until 2 * 1920 })
+    }
+
+    @Test
+    fun anAppendMadeInSilenceCarriesTheSoundOnWithoutAHole() {
+        val file = File(folder.root, "silent-turn.ts")
+        record(file, append = false) {
+            run(0, 30, sound = true)
+            run(30, 90, sound = false)
+        }
+        // the screen turned with the sound off; a second's pause, a new player clock
+        record(file, append = true) { run(0, 60, sound = false, clockUs = 40_000_000, wallUs = 4_000_000) }
+        val pictures = pes(packets(file.readBytes())).map(::pts)
+        val joinGap = pictures.zipWithNext().maxOf { (a, b) -> b - a }
+        val steps = soundTimes(file).zipWithNext().map { (a, b) -> b - a }
+        // one frame apart, but across the pause the picture itself has: the
+        // hole, from the old sound's end to the new's start, spans that pause
+        // and at most a frame at either end of it
+        assertEquals(1, steps.count { it !in 1919..1920 })
+        assertTrue(steps.max() - 1920 <= joinGap + 2 * 1920)
     }
 
     @Test

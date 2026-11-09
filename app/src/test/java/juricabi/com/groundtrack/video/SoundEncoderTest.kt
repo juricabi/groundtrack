@@ -36,9 +36,9 @@ class AdtsTest {
         assertArrayEquals(adts(stereo, ByteArray(0)).copyOf(3), silence(stereo).copyOf(3))
         assertEquals(7 + 6, silence(mono).size)
         assertEquals(7 + 9, silence(stereo).size)
-        assertEquals(21_333L, frameUs(mono))
-        assertEquals(23_219L, frameUs(stereo))
-        assertEquals(128_000L, frameUs(byteArrayOf(0x15, 0x88.toByte()))) // 8 kHz
+        assertEquals(48_000, sampleRate(mono))
+        assertEquals(44_100, sampleRate(stereo))
+        assertEquals(8_000, sampleRate(byteArrayOf(0x15, 0x88.toByte())))
     }
 }
 

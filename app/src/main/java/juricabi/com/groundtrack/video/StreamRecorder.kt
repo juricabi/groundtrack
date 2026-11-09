@@ -43,23 +43,44 @@ interface RecordSink {
  *
  * The sound rides the picture's runs: it is stamped on the same source clock,
  * so the picture's offset places it too, and it waits for the picture to pin
- * each run before it is written. Once a file has sound it keeps it to the
- * end: a stretch the sound leaves empty is filled with silence ([silence]).
+ * each run before it is written. Once a file has sound, the sound has no hole
+ * wherever the picture runs: [silent] is handed the time of each frame of
+ * silence that fills one. ExoPlayer holds a file at the last frame of any
+ * stream it was told of, and where the sound jumps more than a fifth of a
+ * second it jumps its clock with it, skipping the picture the jump spans.
+ * A hole where the picture has one too skips nothing.
  */
-internal class RecordingClock(private val startedAtUs: Long) {
+internal class RecordingClock(private val startedAtUs: Long, private val silent: (Long) -> Unit = {}) {
     private var lastStreamUs: Long? = null
     private var offsetUs = 0L
     private var lastUs = -FRAME_US // nothing recorded: the first pin is free
-    private var lastSoundUs = Long.MIN_VALUE
     private var needKey = true
     private var rebase = true
 
     private var discontinuity = true
 
-    /** A file being appended to already runs to [us]; nothing goes before it. */
+    // the sound: where its last frame began, and its rate — 0 while the
+    // file has none. Silence is counted in frames from where a stretch of it
+    // began, not added up a rounded frame at a time, so it keeps to its samples.
+    private var lastSoundUs = Long.MIN_VALUE
+    private var soundRate = 0
+    private var silenceFromUs = 0L
+    private var silentFrames = -1L // -1: no stretch of silence open
+
+    /** A file being appended to already runs to [us]; no picture goes before it. */
     fun notBefore(us: Long) {
         lastUs = maxOf(lastUs, us)
-        lastSoundUs = maxOf(lastSoundUs, us)
+    }
+
+    /**
+     * The file has sound from here on, in frames of 1024 samples at [rate],
+     * continuing from [fromUs] — where the sound of a file appended to left
+     * off — or else from the picture's present, so a sound that joins late
+     * owes no silence for the time before it.
+     */
+    fun soundFrom(rate: Int, fromUs: Long? = null) {
+        soundRate = rate
+        soundAt(maxOf(lastSoundUs, fromUs ?: lastUs))
     }
 
     /**
@@ -67,30 +88,21 @@ internal class RecordingClock(private val startedAtUs: Long) {
      * it: before the picture has pinned the run it belongs to, from a stretch
      * of the clock the picture is not on (an old run's last frames, queued
      * behind the new one's keyframe), or not after the sound already written
-     * — which, in a file just begun, is its first picture.
+     * — which, at the start of a run, is its first picture. Coming back after
+     * a stretch without it, the sound is led in by silence.
      */
     fun placeSound(streamUs: Long): Long? {
         val last = lastStreamUs ?: return null
         if (rebase || kotlin.math.abs(streamUs - last) > MAX_STEP_US) return null
         val t = streamUs + offsetUs
         if (t <= lastSoundUs) return null
-        lastSoundUs = t
+        fillTo(t)
+        soundAt(t)
         return t
     }
 
-    /**
-     * The time for a frame of silence [frameUs] long, or null when none is
-     * due: the sound has fallen more than a second behind the picture at
-     * [pictureUs] — turned off, lost, or not yet back after a rebuilt screen.
-     * ExoPlayer holds a file at the last frame of any stream it was told of,
-     * so a sound that stopped would freeze the picture there too.
-     */
-    fun silence(pictureUs: Long, frameUs: Long): Long? {
-        val next = lastSoundUs + frameUs
-        if (lastSoundUs == Long.MIN_VALUE || next > pictureUs - SILENCE_LAG_US) return null
-        lastSoundUs = next
-        return next
-    }
+    /** The recording is closing: its sound is carried to its last picture. */
+    fun finish() = fillTo(lastUs)
 
     /** Frames went missing on the way here; carry on from the next keyframe. */
     fun lost() {
@@ -109,8 +121,11 @@ internal class RecordingClock(private val startedAtUs: Long) {
             if (!key) return null
             needKey = false
         }
+        val pinned = rebase
         if (rebase) {
             rebase = false
+            // the run that ended keeps its sound to its last picture
+            fillTo(lastUs)
             // Pinned to the wall clock, but never at or before what is
             // already recorded — a stream clock that ran ahead of the wall's,
             // or a file appended to that ends later than the wall says. The
@@ -122,13 +137,36 @@ internal class RecordingClock(private val startedAtUs: Long) {
         // never backwards within a run either
         val t = maxOf(streamUs + offsetUs, lastUs + 1_000)
         lastUs = t
-        // a new file's sound begins with its picture, not before it
-        if (lastSoundUs == Long.MIN_VALUE) lastSoundUs = t - 1
+        // a run's sound begins with its picture: the gap before it had none
+        if (pinned && t - 1 > lastSoundUs) soundAt(t - 1)
+        // and where the sound has fallen a second behind the picture — turned
+        // off, lost, not yet back — silence carries it, the second left free
+        // for sound still on its way
+        fillTo(t - SILENCE_LAG_US)
         return t
     }
 
     /** True once, for the first frame placed after a jump in time. */
     fun tookDiscontinuity(): Boolean = discontinuity.also { discontinuity = false }
+
+    private fun soundAt(us: Long) {
+        lastSoundUs = us
+        silentFrames = -1
+    }
+
+    /** Silence for every frame that would end at or before [untilUs]. */
+    private fun fillTo(untilUs: Long) {
+        if (soundRate == 0) return
+        if (silentFrames < 0) {
+            silenceFromUs = lastSoundUs
+            silentFrames = 0
+        }
+        while (silenceFromUs + (silentFrames + 2) * 1024 * 1_000_000L / soundRate <= untilUs) {
+            silentFrames++
+            lastSoundUs = silenceFromUs + silentFrames * 1024 * 1_000_000L / soundRate
+            silent(lastSoundUs)
+        }
+    }
 
     private companion object {
         const val MAX_STEP_US = 2_000_000L
@@ -151,7 +189,7 @@ internal class RecordingClock(private val startedAtUs: Long) {
 class StreamRecorder(
     val file: File,
     private val append: Boolean,
-    startedAtUs: Long,
+    private val startedAtUs: Long,
     private val onClosed: (StreamRecorder, endedBy: String?) -> Unit,
     private val clockUs: () -> Long = { SystemClock.elapsedRealtimeNanos() / 1000 },
     private val minFreeBytes: Long = 200L shl 20
@@ -173,9 +211,6 @@ class StreamRecorder(
     @Volatile private var open = true
     @Volatile private var dropped = false
     @Volatile private var endedBy: String? = null
-    private val clock = RecordingClock(startedAtUs)
-    // the writer's own: the form of the file's sound, once it has any
-    private var soundConfig: ByteArray? = null
 
     init {
         Thread({ write() }, "stream-record").start()
@@ -225,16 +260,24 @@ class StreamRecorder(
         synchronized(ONE_WRITER) {
             try {
                 file.parentFile?.mkdirs()
-                if (append) carryOn()
+                val tail = if (append) carryOn() else null
                 BufferedOutputStream(FileOutputStream(file, append), 1 shl 18).use { out ->
                     val muxer = TsMuxer(out)
-                    // a file appended to that has sound keeps it from the start
-                    if (soundConfig != null) muxer.withSound()
-                    fun declare(sound: Sound) {
-                        if (soundConfig != null) return
-                        soundConfig = configOf(sound.data)
+                    // the form of the file's sound once it has any, and its
+                    // silence in that form
+                    var config: ByteArray? = null
+                    var silent = ByteArray(0)
+                    val clock = RecordingClock(startedAtUs) { at -> muxer.sound(silent, at * 9 / 100) }
+                    fun declare(form: ByteArray, fromUs: Long?) {
+                        config = form
+                        silent = silence(form)
                         muxer.withSound()
+                        clock.soundFrom(sampleRate(form), fromUs)
                     }
+                    tail?.endUs?.let(clock::notBefore)
+                    // a file appended to that has sound keeps it, in its form
+                    tail?.soundHeader?.let { declare(configOf(it), tail.soundEndUs) }
+                    var mixed = false
                     fun take(item: Item) {
                         when (item) {
                             is Frame -> {
@@ -247,25 +290,30 @@ class StreamRecorder(
                                     item.codec, item.data, t * 9 / 100, item.key,
                                     item.parameterSets, clock.tookDiscontinuity()
                                 )
-                                val config = soundConfig ?: return
-                                while (true) {
-                                    val at = clock.silence(t, frameUs(config)) ?: break
-                                    muxer.sound(silence(config), at * 9 / 100)
-                                }
                             }
                             is Sound -> {
-                                declare(item)
+                                val form = configOf(item.data)
+                                val declared = config ?: form.also { declare(it, null) }
+                                // A file keeps one form of sound: players set
+                                // themselves up from its first frame. Another
+                                // source's, carried in by Settings changing it
+                                // mid-recording, is left out; silence stands in.
+                                if (!form.contentEquals(declared)) {
+                                    if (!mixed) DebugLog.note("Video", "record left out sound of another form")
+                                    mixed = true
+                                    return
+                                }
                                 clock.placeSound(item.streamUs)?.let { muxer.sound(item.data, it * 9 / 100) }
                             }
                         }
                     }
-                    // The picture's first keyframe brings the file's first
+                    // The picture's first keyframe brings a new file's first
                     // tables, and those are the only ones some players read:
                     // ExoPlayer takes a file's first stream list as final. So
-                    // until the first sound or a second has come, the writer
-                    // looks ahead before writing, and sound seen by then is in
-                    // them — the keyframe often reaches here first.
-                    var held: ArrayList<Item>? = if (soundConfig == null) ArrayList() else null
+                    // until the first sound, or a second of picture, has come,
+                    // the writer looks ahead before writing, and sound seen by
+                    // then is in them — the keyframe often reaches here first.
+                    var held: ArrayList<Item>? = if (append) null else ArrayList()
                     var heldSince = 0L
                     var lastFlush = clockUs()
                     // due at once: a recording must not start onto a full card
@@ -278,19 +326,25 @@ class StreamRecorder(
                             if (next is Item) take(next)
                         } else {
                             if (next is Item) {
-                                if (looking.isEmpty()) heldSince = clockUs()
+                                // timed by the picture's own arrivals, the
+                                // writer's clock only when the stream is silent
+                                if (looking.isEmpty()) heldSince = (next as? Frame)?.arrivalUs ?: clockUs()
                                 looking += next
                             }
+                            val seen = (next as? Frame)?.arrivalUs ?: clockUs()
                             if (next is Sound || next === CLOSE ||
-                                looking.isNotEmpty() && clockUs() - heldSince >= LOOK_AHEAD_US
+                                looking.isNotEmpty() && seen - heldSince >= LOOK_AHEAD_US
                             ) {
                                 held = null
                                 // declared ahead of the keyframe it may follow
-                                (next as? Sound)?.let(::declare)
+                                if (next is Sound && config == null) declare(configOf(next.data), null)
                                 looking.forEach(::take)
                             }
                         }
-                        if (next === CLOSE) break
+                        if (next === CLOSE) {
+                            clock.finish()
+                            break
+                        }
                         val now = clockUs()
                         // written through each second, so a kill loses at most that
                         if (now - lastFlush >= 1_000_000) {
@@ -322,15 +376,18 @@ class StreamRecorder(
         onClosed(this, endedBy)
     }
 
+    /** Where a file appended to left off: its last time, and its sound's if it has any. */
+    private class Tail(val endUs: Long?, val soundEndUs: Long?, val soundHeader: ByteArray?)
+
     /**
      * Before appending: a kill can leave half a packet at the end, and every
      * packet written after it would be misaligned — so the file is cut back
-     * to whole packets, the clock told where the file's time stands, and the
-     * recorder whether the file has sound, which it then keeps.
+     * to whole packets, and read for where its time stands and whether it has
+     * sound, which it then keeps.
      */
-    private fun carryOn() {
-        if (!file.isFile) return
-        java.io.RandomAccessFile(file, "rw").use { f ->
+    private fun carryOn(): Tail? {
+        if (!file.isFile) return null
+        return java.io.RandomAccessFile(file, "rw").use { f ->
             val whole = f.length() - f.length() % TsMuxer.PACKET
             if (whole != f.length()) f.setLength(whole)
             // enough tail to hold the start of a picture even at a goggle's
@@ -338,8 +395,11 @@ class StreamRecorder(
             val tail = ByteArray(minOf(whole, 8192L * TsMuxer.PACKET).toInt())
             f.seek(whole - tail.size)
             f.readFully(tail)
-            lastTime90k(tail)?.let { clock.notBefore(it * 100 / 9) }
-            soundConfig = lastSoundHeader(tail)?.let(::configOf)
+            Tail(
+                lastTime90k(tail)?.let { it * 100 / 9 },
+                lastTime90k(tail, TsMuxer.SOUND_PID)?.let { it * 100 / 9 },
+                lastSoundHeader(tail)
+            )
         }
     }
 

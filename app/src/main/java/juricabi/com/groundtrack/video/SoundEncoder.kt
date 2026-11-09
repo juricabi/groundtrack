@@ -196,11 +196,9 @@ internal fun configOf(adts: ByteArray): ByteArray {
 internal fun silence(config: ByteArray): ByteArray =
     adts(config, if (((config[1].toInt() and 0xFF) shr 3) and 0x0F == 1) SILENT_MONO else SILENT_STEREO)
 
-/** How long one frame of [config] lasts in µs: 1024 samples at its rate. */
-internal fun frameUs(config: ByteArray): Long {
-    val rateIndex = ((config[0].toInt() and 0x07) shl 1) or ((config[1].toInt() and 0xFF) shr 7)
-    return 1024 * 1_000_000L / RATES[rateIndex]
-}
+/** The sample rate [config] names; a frame is 1024 samples of it. */
+internal fun sampleRate(config: ByteArray): Int =
+    RATES[((config[0].toInt() and 0x07) shl 1) or ((config[1].toInt() and 0xFF) shr 7)]
 
 private val RATES = intArrayOf(96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
 private val SILENT_MONO = byteArrayOf(0x00, 0xC8.toByte(), 0x00, 0x80.toByte(), 0x23, 0x80.toByte())

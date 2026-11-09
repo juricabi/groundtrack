@@ -122,16 +122,26 @@ class TsMuxerTest {
 
     @Test
     fun soundOfEverySizeIsWholeAndOnlyItsFirstIsARestart() {
-        val sizes = listOf(1, 160, 161, 162, 163, 168, 169, 170, 171, 400)
+        val sizes = listOf(1, 160, 161, 162, 163, 345, 346, 347, 348)
         val packets = packets(mux {
             frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false)
             for (size in sizes) sound(aacFrame(size), 0)
         })
-        // around the first packet's 182 bytes of room (its restart flag takes
-        // two) and the 184 after; the frame back whole, the stuffing all outside it
+        // around a packet's 184 bytes of room, and a second packet's; the
+        // frame back whole, the stuffing all outside it
         assertEquals(sizes.map { aacFrame(it).toList() }, pes(packets, TsMuxer.SOUND_PID).map {
             it.copyOfRange(14, it.size).toList()
         })
+        // and around the 182 of a muxer's first, its restart flag taking two
+        for (size in listOf(159, 160, 161, 162)) {
+            val first = packets(mux {
+                frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false)
+                sound(aacFrame(size), 0)
+            })
+            val body = pes(first, TsMuxer.SOUND_PID).single()
+            assertArrayEquals("size $size", aacFrame(size), body.copyOfRange(14, body.size))
+            assertEquals(0x80, first.first { it.pid == TsMuxer.SOUND_PID }.flags and 0x80)
+        }
         val starts = packets.filter { it.pid == TsMuxer.SOUND_PID && it.start }
         assertEquals(0x80, starts.first().flags and 0x80)
         assertTrue(starts.drop(1).all { it.flags and 0x80 == 0 })
