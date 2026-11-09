@@ -101,10 +101,12 @@ class RecordingClockTest {
         assertEquals(listOf(10_000 + frame16k), silent)
         clock.place(1_500_000, 1_500_000, false)
         assertEquals((1..6).map { 10_000 + it * frame16k }, silent)
-        // the sound coming back is led in by silence up to it, never over it
-        assertEquals(1_200_000L, clock.placeSound(1_200_000))
+        // the sound coming back is led in by silence, and picks up where the
+        // silence ends — under a frame early, so not a sample's hole is left
+        assertEquals(10_000 + 18 * frame16k, clock.placeSound(1_200_000))
         assertEquals((1..17).map { 10_000 + it * frame16k }, silent)
-        assertTrue(1_200_000 - (silent.last() + frame16k) in 0 until frame16k)
+        // and the rest of its stretch keeps to that
+        assertEquals(10_000 + 19 * frame16k, clock.placeSound(1_200_000 + frame16k))
     }
 
     @Test
@@ -117,12 +119,13 @@ class RecordingClockTest {
         for (k in 1..30) clock.place(k * 100_000L, k * 100_000L, false) // three seconds, silent from the start
         // a rebuilt player, five seconds on
         assertEquals(8_000_000L, clock.place(0, 8_000_000, true))
-        // the run that ended has its sound to its last picture, at 3 s...
-        assertTrue(silent.last() + frame16k <= 3_000_000 && silent.last() + 2 * frame16k > 3_000_000)
+        // the run that ended has its sound through its last picture, at 3 s...
+        assertTrue(silent.last() <= 3_000_000 && silent.last() + frame16k > 3_000_000)
         // ...and the gap the picture has too goes without
         assertTrue(silent.none { it > 3_000_000 })
         assertNull(clock.placeSound(-5_000)) // from before the new run's picture
-        assertEquals(8_005_000L, clock.placeSound(5_000))
+        // the new run's sound starts with its picture, under a frame early
+        assertEquals(8_000_000L, clock.placeSound(5_000))
     }
 
     @Test
@@ -145,7 +148,7 @@ class RecordingClockTest {
         clock.notBefore(10_000_000)
         clock.soundFrom(16_000, fromUs = 9_000_000)
         clock.place(0, 12_000_000, true) // the next screen's first frame
-        assertEquals((1..14).map { 9_000_000 + it * frame16k }, silent)
+        assertEquals((1..15).map { 9_000_000 + it * frame16k }, silent)
     }
 
     @Test
@@ -158,7 +161,8 @@ class RecordingClockTest {
         clock.place(2_000_000, 2_000_000, false)
         assertEquals(10_000 + 14 * frame16k, silent.last())
         clock.finish()
-        assertEquals(10_000 + 30 * frame16k, silent.last())
+        // through the last picture: the frame that holds it
+        assertEquals(10_000 + 31 * frame16k, silent.last())
     }
 
     @Test
@@ -271,19 +275,19 @@ class StreamRecorderTest {
         assertEquals(1, pmts.size)
         assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts[0]))
         // on the picture's timeline, 90 kHz with the 0.1 s lead: the sound
-        // from stream time 100 ms lands beside the picture's frame from
-        // 99.999, led in by silence from the first picture, gapless
+        // begins with the first picture, led in by silence to the real sound,
+        // and runs a frame apart throughout
         val sounds = pes(packets, TsMuxer.SOUND_PID).map(::pts)
-        assertTrue(sounds.containsAll(listOf(18_000L, 19_919L)))
-        assertTrue(sounds.first() < 9_000 + 2 * 1920)
-        assertTrue(sounds.zipWithNext().all { (a, b) -> b - a in 1919 until 2 * 1920 })
-        assertEquals(17_999L, pts(pes(packets)[3]))
+        assertEquals(pts(pes(packets).first()), sounds.first())
+        assertTrue(sounds.zipWithNext().all { (a, b) -> b - a in FRAME_TICKS })
     }
 
     private val aac = adts(byteArrayOf(0x11, 0x88.toByte()), ByteArray(100))
 
     /** A steady 30 fps stream from frame [from] to [to], a keyframe a second, its sound alongside while [sound]. */
-    private fun StreamRecorder.run(from: Int, to: Int, sound: Boolean, clockUs: Long = 0, wallUs: Long = 0) {
+    private fun StreamRecorder.run(
+        from: Int, to: Int, sound: Boolean, clockUs: Long = 0, wallUs: Long = 0, form: ByteArray = aac
+    ) {
         var j = (from * 33_333L + 21_332) / 21_333
         for (i in from until to) {
             now = wallUs + i * 33_333L
@@ -291,11 +295,15 @@ class StreamRecorderTest {
                 RtpCodec.H264, byteArrayOf(0, 0, 0, 1, if (i % 30 == 0) 0x65 else 0x41) + ByteArray(700),
                 clockUs + i * 33_333L, i % 30 == 0, listOf(byteArrayOf(0x67, 1, 2), byteArrayOf(0x68, 3))
             )
-            while (sound && j * 21_333L < (i + 1) * 33_333L) sound(aac, clockUs + j++ * 21_333L)
+            while (sound && j * 21_333L < (i + 1) * 33_333L) sound(form, clockUs + j++ * 21_333L)
         }
     }
 
     private fun soundTimes(file: File) = pes(packets(file.readBytes()), TsMuxer.SOUND_PID).map(::pts)
+
+    // A 48 kHz frame is 1920 ticks of the 90 kHz clock, give or take the one
+    // each time's own rounding down from µs makes — never adding up.
+    private val FRAME_TICKS = 1919L..1921L
 
     @Test
     fun aKeyframeAheadOfTheSoundStillHasItInTheFirstTables() {
@@ -303,8 +311,8 @@ class StreamRecorderTest {
         record(file, append = false) {
             // the picture's keyframe reaches the recorder first, the sound
             // a third of a second behind it
-            run(0, 10, sound = false)
-            run(10, 60, sound = true)
+            run(0, 10, sound = false, wallUs = 5_000_000)
+            run(10, 60, sound = true, wallUs = 5_000_000)
         }
         val pmts = packets(file.readBytes()).filter { it.pid == TsMuxer.PMT_PID }
         assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts.first()))
@@ -319,7 +327,7 @@ class StreamRecorderTest {
         }
         val times = soundTimes(file)
         // never a step but one frame's, and on to the last picture as it closes
-        assertTrue(times.zipWithNext().all { (a, b) -> b - a in 1919..1920 })
+        assertTrue(times.zipWithNext().all { (a, b) -> b - a in FRAME_TICKS })
         val lastPicture = pes(packets(file.readBytes())).map(::pts).last()
         assertTrue(lastPicture - times.last() in 0..2 * 1920)
     }
@@ -332,8 +340,8 @@ class StreamRecorderTest {
             run(30, 90, sound = false)
             run(90, 150, sound = true)
         }
-        // a frame apart throughout; where the sound returns, under two
-        assertTrue(soundTimes(file).zipWithNext().all { (a, b) -> b - a in 1919 until 2 * 1920 })
+        // a frame apart throughout, where the sound returns too
+        assertTrue(soundTimes(file).zipWithNext().all { (a, b) -> b - a in FRAME_TICKS })
     }
 
     @Test
@@ -351,7 +359,7 @@ class StreamRecorderTest {
         // one frame apart, but across the pause the picture itself has: the
         // hole, from the old sound's end to the new's start, spans that pause
         // and at most a frame at either end of it
-        assertEquals(1, steps.count { it !in 1919..1920 })
+        assertEquals(1, steps.count { it !in FRAME_TICKS })
         assertTrue(steps.max() - 1920 <= joinGap + 2 * 1920)
     }
 
@@ -369,6 +377,58 @@ class StreamRecorderTest {
         assertTrue(times.size > before.size)
         // on from where the file's sound left off, never back over it
         assertTrue(times.zipWithNext().all { (a, b) -> b > a })
+    }
+
+    @Test
+    fun theLookAheadCountsFromTheKeyframeThatBringsTheTables() {
+        val file = File(folder.root, "midgop.ts")
+        record(file, append = false) {
+            // begun mid-picture-group: the keyframe half a second in, the
+            // sound two thirds of a second after it
+            run(15, 50, sound = false, wallUs = 5_000_000)
+            run(50, 90, sound = true, wallUs = 5_000_000)
+        }
+        val pmts = packets(file.readBytes()).filter { it.pid == TsMuxer.PMT_PID }
+        assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts.first()))
+    }
+
+    @Test
+    fun soundTooLateForTheFirstTablesIsInLaterOnes() {
+        val file = File(folder.root, "late.ts")
+        record(file, append = false) {
+            run(0, 45, sound = false, wallUs = 5_000_000)
+            run(45, 90, sound = true, wallUs = 5_000_000)
+        }
+        val pmts = packets(file.readBytes()).filter { it.pid == TsMuxer.PMT_PID }
+        assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID), streams(pmts.first()))
+        assertTrue(pmts.any { streams(it).contains(0x0F to TsMuxer.SOUND_PID) })
+    }
+
+    @Test
+    fun soundOfAnotherFormIsLeftOutAndSilenceStandsIn() {
+        val file = File(folder.root, "forms.ts")
+        val stereo = adts(byteArrayOf(0x12, 0x10), ByteArray(100))
+        record(file, append = false) {
+            run(0, 30, sound = true)
+            run(30, 90, sound = true, form = stereo)
+        }
+        val sounds = pes(packets(file.readBytes()), TsMuxer.SOUND_PID)
+        // one form throughout: the file's first
+        assertTrue(sounds.all { it.copyOfRange(14, 17).contentEquals(aac.copyOf(3)) })
+        assertTrue(soundTimes(file).zipWithNext().all { (a, b) -> b - a in FRAME_TICKS })
+    }
+
+    @Test
+    fun anAppendCountsOnFromTheFilesOwnPackets() {
+        val file = File(folder.root, "counted.ts")
+        record(file, append = false) { run(0, 40, sound = true) }
+        record(file, append = true) { run(0, 40, sound = true, clockUs = 30_000_000, wallUs = 3_000_000) }
+        val packets = packets(file.readBytes())
+        for (pid in listOf(TsMuxer.VIDEO_PID, TsMuxer.SOUND_PID)) {
+            packets.filter { it.pid == pid }.zipWithNext().forEach { (a, b) ->
+                assertEquals("pid $pid", (a.counter + 1) and 0x0F, b.counter)
+            }
+        }
     }
 
     @Test

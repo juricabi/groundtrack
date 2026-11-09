@@ -18,17 +18,19 @@ import java.io.OutputStream
  * file can be opened, cut or resumed at any keyframe — and a goggle changing
  * resolution mid-flight lands its new SPS in-band where a player finds it.
  */
-internal class TsMuxer(private val out: OutputStream) {
+internal class TsMuxer(
+    private val out: OutputStream,
+    // where a file appended to left its picture's and sound's packet counts
+    private var videoCounter: Int = 0,
+    private var soundCounter: Int = 0
+) {
 
     private val packet = ByteArray(PACKET)
     private var codec: RtpCodec? = null
     private var pmtVersion = -1
     private var patCounter = 0
     private var pmtCounter = 0
-    private var videoCounter = 0
-    private var soundCounter = 0
     private var soundDeclared = false
-    private var soundSent = false
 
     /**
      * One access unit, Annex B. [time90k] is its place on the recording's
@@ -88,10 +90,7 @@ internal class TsMuxer(private val out: OutputStream) {
     fun sound(adts: ByteArray, time90k: Long) {
         withSound()
         val header = pesHeader(SOUND_STREAM, (time90k + PTS_LEAD) and MASK_33, 8 + adts.size)
-        // the muxer's first, like its first tables: an appended file's sound
-        // ran on counters this one starts over
-        writePes(SOUND_PID, header + adts, null, false, discontinuity = !soundSent)
-        soundSent = true
+        writePes(SOUND_PID, header + adts, null, false, discontinuity = false)
     }
 
     private fun writeTables(codec: RtpCodec) {
@@ -303,6 +302,18 @@ internal fun lastSoundHeader(tail: ByteArray): ByteArray? = pesStarts(tail)
         val adts = it.pes + 9 + (tail[it.pes + 8].toInt() and 0xFF)
         if (adts + 7 <= it.end && tail[adts].toInt() and 0xFF == 0xFF) tail.copyOfRange(adts, adts + 7) else null
     }
+
+/** The count [pid]'s next packet carries, following the tail's last; 0 when the tail has none. */
+internal fun nextCounter(tail: ByteArray, pid: Int): Int {
+    var at = tail.size - tail.size % TsMuxer.PACKET
+    while (at >= TsMuxer.PACKET) {
+        at -= TsMuxer.PACKET
+        if (tail[at].toInt() != 0x47) continue
+        if ((tail[at + 1].toInt() and 0x1F shl 8) or (tail[at + 2].toInt() and 0xFF) != pid) continue
+        return ((tail[at + 3].toInt() and 0x0F) + 1) and 0x0F
+    }
+    return 0
+}
 
 /** Where a PES begins in a stream's tail: its PID, its header, and the end of the packet holding it. */
 private class PesStart(val pid: Int, val pes: Int, val end: Int)

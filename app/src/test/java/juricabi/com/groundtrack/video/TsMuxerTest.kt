@@ -121,7 +121,7 @@ class TsMuxerTest {
     }
 
     @Test
-    fun soundOfEverySizeIsWholeAndOnlyItsFirstIsARestart() {
+    fun soundOfEverySizeIsWholeAndNoneIsARestart() {
         val sizes = listOf(1, 160, 161, 162, 163, 345, 346, 347, 348)
         val packets = packets(mux {
             frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false)
@@ -132,19 +132,8 @@ class TsMuxerTest {
         assertEquals(sizes.map { aacFrame(it).toList() }, pes(packets, TsMuxer.SOUND_PID).map {
             it.copyOfRange(14, it.size).toList()
         })
-        // and around the 182 of a muxer's first, its restart flag taking two
-        for (size in listOf(159, 160, 161, 162)) {
-            val first = packets(mux {
-                frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false)
-                sound(aacFrame(size), 0)
-            })
-            val body = pes(first, TsMuxer.SOUND_PID).single()
-            assertArrayEquals("size $size", aacFrame(size), body.copyOfRange(14, body.size))
-            assertEquals(0x80, first.first { it.pid == TsMuxer.SOUND_PID }.flags and 0x80)
-        }
-        val starts = packets.filter { it.pid == TsMuxer.SOUND_PID && it.start }
-        assertEquals(0x80, starts.first().flags and 0x80)
-        assertTrue(starts.drop(1).all { it.flags and 0x80 == 0 })
+        // the sound runs on its counters, and carries no clock: no flags
+        assertTrue(packets.filter { it.pid == TsMuxer.SOUND_PID }.all { it.flags == 0 })
     }
 
     @Test
@@ -236,6 +225,29 @@ class TsMuxerTest {
         }
         assertEquals(96_000L, lastTime90k(ts))
         assertEquals(null, lastTime90k(ByteArray(0)))
+    }
+
+    @Test
+    fun aMuxerAppendingCountsOnFromTheFile() {
+        val before = mux {
+            frame(RtpCodec.H264, idr(500), 0, true, listOf(sps, pps), false)
+            sound(aac, 0)
+        }
+        val video = nextCounter(before, TsMuxer.VIDEO_PID)
+        val sound = nextCounter(before, TsMuxer.SOUND_PID)
+        val after = ByteArrayOutputStream().also {
+            TsMuxer(it, video, sound).apply {
+                frame(RtpCodec.H264, idr(10), 3000, true, emptyList(), true)
+                sound(aac, 3000)
+            }
+        }.toByteArray()
+        val joined = packets(before + after)
+        for (pid in listOf(TsMuxer.VIDEO_PID, TsMuxer.SOUND_PID)) {
+            joined.filter { it.pid == pid }.zipWithNext().forEach { (a, b) ->
+                assertEquals("pid $pid", (a.counter + 1) and 0x0F, b.counter)
+            }
+        }
+        assertEquals(0, nextCounter(ByteArray(0), TsMuxer.SOUND_PID))
     }
 
     @Test

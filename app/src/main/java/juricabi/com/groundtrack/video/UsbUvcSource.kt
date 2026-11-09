@@ -421,6 +421,8 @@ class UsbUvcSource(
             var routeCheckedUs = 0L
             while (running.get()) {
                 val n = record.read(buf, 0, buf.size)
+                // switched off while the read waited: this chunk is no one's
+                if (!running.get()) break
                 if (n > 0) {
                     // stamped as read, ahead of the write, which may wait on the speaker
                     val heardUs = clock.stamp(n / 2, android.os.SystemClock.elapsedRealtimeNanos() / 1000)
