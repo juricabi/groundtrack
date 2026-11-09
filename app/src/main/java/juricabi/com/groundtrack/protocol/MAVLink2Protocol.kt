@@ -71,6 +71,9 @@ class MAVLink2Protocol : Protocol {
         private const val MAV_PACKET_HOME_POSITION_LENGTH = 52
         // STATUSTEXT's text field, and after it the id and chunk_seq of a long one
         private const val TEXT_LENGTH = 50
+        // a long message's next chunk comes within these of the link's other packets
+        private const val CHUNK_PATIENCE = 50
+        private val GAP = "…".toByteArray()
         private const val MAV_PACKET_TRANSMISSION_HANDSHAKE = 130
         private const val MAV_PACKET_ENCAPSULATED_DATA      = 131
     }
@@ -149,15 +152,23 @@ class MAVLink2Protocol : Protocol {
         }
     }
 
-    // A message longer than fifty characters, as PX4 sends one: in chunks of
-    // fifty under one id, numbered from 0, the last the one with a NUL in it.
-    // Joined here, where the link is read, so the screen, the CSV and a replay
-    // all have the message whole. A chunk out of turn — one lost on the link,
-    // or another message begun — first sends on what was gathered: a message
-    // missing a piece is still worth reading, and none is held back for good.
+    // A message longer than fifty characters, in chunks of fifty under one id,
+    // numbered from 0, the last the one with a NUL in it — PX4 and ArduPilot
+    // both send them so. Joined here, where the link is read, so the screen,
+    // the CSV and a replay all have the message whole, its bytes joined before
+    // they are read, as a character can straddle two chunks.
+    //
+    // Nothing is held back for good. Another long message begun sends on what
+    // was gathered; a piece lost on the way stands as "…" in its place; and
+    // PX4 ends a text of exactly fifty or a hundred characters with no NUL at
+    // all, so one not ended within fifty of the link's other packets — counted,
+    // not timed, so a replay joins it where the flight did — goes on as it is.
+    // A chunk come again, of this message or the one just sent, is dropped.
+    // The severity is the first chunk's: every chunk carries the same.
     private var chunkId = 0
     private var nextChunk = 0
     private var chunkSeverity = 0
+    private var sinceChunk = 0
     private val chunks = java.io.ByteArrayOutputStream()
 
     private fun statusText(payload: ByteArray) {
@@ -169,24 +180,27 @@ class MAVLink2Protocol : Protocol {
         val seq = payload[TEXT_LENGTH + 3].toInt() and 0xFF
         if (id == 0) {
             // the only chunk there is
-            sendChunks()
             say(severity, words)
             return
         }
-        if (chunks.size() == 0 || id != chunkId || seq != nextChunk) {
+        if (id != chunkId) {
             sendChunks()
             chunkId = id
             chunkSeverity = severity
+            nextChunk = 0
         }
+        if (seq < nextChunk) return
+        if (seq > nextChunk) chunks.write(GAP)
         chunks.write(words)
         nextChunk = seq + 1
+        sinceChunk = 0
         if (end <= TEXT_LENGTH) sendChunks()
     }
 
     private fun sendChunks() {
         if (chunks.size() > 0) say(chunkSeverity, chunks.toByteArray())
         chunks.reset()
-        chunkId = 0
+        nextChunk = Int.MAX_VALUE
     }
 
     /** One whole message, in the form every link's status text takes: severity, words, NUL. */
@@ -198,6 +212,7 @@ class MAVLink2Protocol : Protocol {
     }
 
     private fun processPacket() {
+        if (chunks.size() > 0 && ++sinceChunk > CHUNK_PATIENCE) sendChunks()
         val byteBuffer = ByteBuffer.wrap(buffer.copyOf(255).map { it.toByte() }.toByteArray())
             .order(ByteOrder.LITTLE_ENDIAN)
         if (messageId == MAV_PACKET_STATUS_ID) {

@@ -18,10 +18,12 @@ class StatusTextTest {
         override fun onStatusText(message: String, severity: Int) { said.add(message to severity) }
     }
 
-    private fun text(severity: Int, words: String, padTo: Int = 51): ByteArray {
-        val payload = ByteArray(maxOf(padTo, 1 + words.length))
+    private fun text(severity: Int, words: String, padTo: Int = 51) = text(severity, words.toByteArray(), padTo)
+
+    private fun text(severity: Int, words: ByteArray, padTo: Int = 51): ByteArray {
+        val payload = ByteArray(maxOf(padTo, 1 + words.size))
         payload[0] = severity.toByte()
-        words.toByteArray().copyInto(payload, 1)
+        words.copyInto(payload, 1)
         return payload
     }
 
@@ -52,7 +54,9 @@ class StatusTextTest {
         assertEquals(listOf(words to 6), ear.said)
     }
 
-    private fun chunk(severity: Int, words: String, id: Int, seq: Int) =
+    private fun chunk(severity: Int, words: String, id: Int, seq: Int) = chunk(severity, words.toByteArray(), id, seq)
+
+    private fun chunk(severity: Int, words: ByteArray, id: Int, seq: Int) =
         mav2Frame(STATUSTEXT, text(severity, words) + byteArrayOf(id.toByte(), (id shr 8).toByte(), seq.toByte()))
 
     @Test
@@ -77,6 +81,49 @@ class StatusTextTest {
     }
 
     @Test
+    fun aCharacterAcrossTwoChunksIsReadWhole() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        val degree = "°".toByteArray()
+        feed(protocol, chunk(6, "t".repeat(49).toByteArray() + degree[0], id = 3, seq = 0))
+        feed(protocol, chunk(6, byteArrayOf(degree[1]) + "C".toByteArray(), id = 3, seq = 1))
+        assertEquals(listOf("t".repeat(49) + "°C" to 6), ear.said)
+    }
+
+    @Test
+    fun aChunkLostInTheMiddleStandsAsAnEllipsis() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        feed(protocol, chunk(3, "a".repeat(50), id = 5, seq = 0))
+        feed(protocol, chunk(3, "the end", id = 5, seq = 2))
+        assertEquals(listOf("a".repeat(50) + "…the end" to 3), ear.said)
+    }
+
+    @Test
+    fun aChunkComeAgainIsDropped() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        feed(protocol, chunk(4, "c".repeat(50), id = 8, seq = 0))
+        feed(protocol, chunk(4, "c".repeat(50), id = 8, seq = 0))
+        feed(protocol, chunk(4, "done", id = 8, seq = 1))
+        // and again after the message was sent on
+        feed(protocol, chunk(4, "done", id = 8, seq = 1))
+        assertEquals(listOf("c".repeat(50) + "done" to 4), ear.said)
+    }
+
+    @Test
+    fun aMessageThatNeverEndsGoesOnAfterFiftyPackets() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        // PX4 ends a text of exactly fifty characters with no NUL and no empty chunk
+        feed(protocol, chunk(6, "d".repeat(50), id = 11, seq = 0))
+        repeat(50) { feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9))) }
+        assertEquals(emptyList<Pair<String, Int>>(), ear.said)
+        feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9)))
+        assertEquals(listOf("d".repeat(50) to 6), ear.said)
+    }
+
+    @Test
     fun aChunkLostOnTheLinkSendsOnWhatCame() {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)
@@ -87,12 +134,13 @@ class StatusTextTest {
     }
 
     @Test
-    fun aMessageInOnePieceGoesAfterOneBeingGathered() {
+    fun aMessageInOnePieceGoesThroughOneBeingGathered() {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)
         feed(protocol, chunk(6, "b".repeat(50), id = 7, seq = 0))
-        feed(protocol, mav2Frame(STATUSTEXT, text(6, "Armed")))
-        assertEquals(listOf("b".repeat(50) to 6, "Armed" to 6), ear.said)
+        feed(protocol, mav2Frame(STATUSTEXT, text(5, "Armed")))
+        feed(protocol, chunk(6, "tail", id = 7, seq = 1))
+        assertEquals(listOf("Armed" to 5, "b".repeat(50) + "tail" to 6), ear.said)
     }
 
     @Test
@@ -130,5 +178,6 @@ class StatusTextTest {
 
     private companion object {
         const val STATUSTEXT = 253
+        const val HEARTBEAT = 0
     }
 }
