@@ -327,8 +327,9 @@ class UsbUvcSource(
     // — separate from the UVC video interface this class opens. So the sound
     // is not the library's to give (it only encodes the phone's mic for a
     // recording); it is read straight off that input with AudioRecord and
-    // poured to the speaker through AudioTrack. No receiver audio interface,
-    // no sound button — the picture is never held hostage to it.
+    // poured to the speaker through AudioTrack. While a recording runs, the
+    // same reads go to it too. No receiver audio interface, no sound button —
+    // the picture is never held hostage to it.
 
     /** The receiver's audio input, if the OS enumerated one. */
     private fun usbAudioInput(): AudioDeviceInfo? {
@@ -379,6 +380,9 @@ class UsbUvcSource(
         }
         var record: AudioRecord? = null
         var track: AudioTrack? = null
+        // each audio thread's own: a join that timed out must not leave two
+        // threads feeding one encoder
+        val sound = SoundTap("uvc")
         try {
             record = AudioRecord(
                 MediaRecorder.AudioSource.MIC, rate,
@@ -407,10 +411,14 @@ class UsbUvcSource(
             track.play()
             DebugLog.note("Video", "uvc audio up from ${input.productName}")
             val buf = ByteArray(inMin)
+            val clock = SampleClock(rate)
             while (audioRunning) {
                 val n = record.read(buf, 0, buf.size)
                 if (n > 0) {
+                    // stamped as read, ahead of the write, which may wait on the speaker
+                    val heardUs = clock.stamp(n / 2, android.os.SystemClock.elapsedRealtimeNanos() / 1000)
                     track.write(buf, 0, n)
+                    sound.pcm(java.nio.ByteBuffer.wrap(buf, 0, n), rate, 1, heardUs, recordSink)
                 } else if (n < 0) {
                     // the input is gone — the receiver unplugged mid-listen.
                     // Only trouble if it was still wanted; a clean setAudio(off)
@@ -430,6 +438,7 @@ class UsbUvcSource(
             record?.release()
             try { track?.stop() } catch (e: Exception) {}
             track?.release()
+            sound.release()
         }
     }
 

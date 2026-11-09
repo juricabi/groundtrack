@@ -143,8 +143,9 @@ and raw RTP are saved exactly as they arrive; USB and MJPEG go through the
 phone's hardware H.264 encoder. The files are MPEG transport streams (`.ts`,
 for VLC, mpv or ffmpeg), readable to the last byte, so a crash or a flat
 battery keeps everything up to the last second. Rotations and dropouts
-continue the same file. Picture only, as the camera sent it; a recording
-stops itself when storage runs low.
+continue the same file. The picture goes in as the camera sent it, never
+turned; with the sound on, its sound goes in too (USB and RTSP, the sources
+that carry any), as AAC. A recording stops itself when storage runs low.
 
 To try `udp://` with no hardware, send a test pattern from a PC on the same
 Wi-Fi, or from Termux on the phone to `127.0.0.1`:

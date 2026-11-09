@@ -70,6 +70,44 @@ class RecordingClockTest {
         assertEquals(first + 33_333, clock.place(33_333, 1_033_333, false))
         assertEquals(first + 66_666, clock.place(66_666, 1_066_666, false))
     }
+
+    @Test
+    fun soundWaitsForThePictureToPinItsRunThenRidesItsOffset() {
+        val clock = RecordingClock(startedAtUs = 1_000_000)
+        assertNull(clock.placeSound(10_000))
+        clock.place(streamUs = 0, arrivalUs = 1_200_000, key = false) // not yet a keyframe
+        assertNull(clock.placeSound(20_000))
+        assertEquals(200_000L, clock.place(streamUs = 33_000, arrivalUs = 1_200_000, key = true))
+        // the picture's offset, exactly, whatever the sound's own arrival
+        assertEquals(188_000L, clock.placeSound(21_000))
+        assertEquals(209_333L, clock.placeSound(42_333))
+    }
+
+    @Test
+    fun soundFromAnotherStretchOfTheClockIsLeftOut() {
+        val clock = RecordingClock(0)
+        clock.place(10_000_000, 0, true)
+        // an old run's sound, queued behind a rebuilt player's first frames
+        assertNull(clock.placeSound(1_000))
+        // the picture jumped and has not pinned the new run yet
+        assertNull(clock.place(0, 5_000_000, false))
+        assertNull(clock.placeSound(10_000))
+        clock.place(33_000, 5_033_000, true)
+        assertEquals(5_010_000L, clock.placeSound(10_000))
+    }
+
+    @Test
+    fun soundNeverStepsBackNorBeforeAnAppendedFilesEnd() {
+        val clock = RecordingClock(0)
+        clock.notBefore(5_000_000)
+        // pinned a frame past the file's end: 5.04 s, so the run's offset is 4.04 s
+        assertEquals(5_040_000L, clock.place(1_000_000, 1_000_000, true))
+        // sound from 50 ms before that frame would land before the file's end
+        assertNull(clock.placeSound(950_000))
+        assertEquals(5_050_000L, clock.placeSound(1_010_000))
+        assertNull(clock.placeSound(1_010_000))
+        assertNull(clock.placeSound(1_005_000))
+    }
 }
 
 @RunWith(RobolectricTestRunner::class)
@@ -125,6 +163,29 @@ class StreamRecorderTest {
         val bytes = file.readBytes()
         assertEquals(0, bytes.size % 188)
         assertTrue(lastTime90k(bytes)!! > before)
+    }
+
+    @Test
+    fun soundBeforeTheFirstKeyframeIsDeclaredInTheFilesFirstTables() {
+        val file = File(folder.root, "sound.ts")
+        val sound = adts(byteArrayOf(0x11, 0x88.toByte()), ByteArray(100))
+        assertNull(record(file, append = false) {
+            // the sound is up before the picture's first keyframe, as it
+            // usually is: these are left out, but say a sound is coming
+            for (i in 0 until 5) sound(sound, i * 21_333L)
+            gop(0)
+            sound(sound, 100_000)
+            sound(sound, 121_333)
+        })
+        val packets = packets(file.readBytes())
+        val pmts = packets.filter { it.pid == TsMuxer.PMT_PID }
+        // one stream list, the first, and it names the sound
+        assertEquals(1, pmts.size)
+        assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts[0]))
+        // on the picture's timeline, 90 kHz with the 0.1 s lead: the sound
+        // from stream time 100 ms lands beside the picture's frame from 99.999
+        assertEquals(listOf(18_000L, 19_919L), pes(packets, TsMuxer.SOUND_PID).map(::pts))
+        assertEquals(17_999L, pts(pes(packets)[3]))
     }
 
     @Test

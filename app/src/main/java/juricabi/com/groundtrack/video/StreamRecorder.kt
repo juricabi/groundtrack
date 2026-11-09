@@ -10,8 +10,9 @@ import java.util.concurrent.atomic.AtomicLong
 import juricabi.com.groundtrack.utils.DebugLog
 
 /**
- * Where a source hands its compressed picture while a recording runs. Called
- * from whatever thread the source lives on; it must never block it.
+ * Where a source hands its compressed picture, and its sound, while a
+ * recording runs. Called from whatever thread the source lives on; it must
+ * never block it.
  */
 interface RecordSink {
     /**
@@ -20,6 +21,12 @@ interface RecordSink {
      * [parameterSets] matter only for a keyframe.
      */
     fun frame(codec: RtpCodec, annexB: ByteArray, streamUs: Long, key: Boolean, parameterSets: List<ByteArray>)
+
+    /**
+     * One AAC frame of the picture's sound, ADTS-framed, stamped on the same
+     * clock as the picture's frames — the two are kept together by that alone.
+     */
+    fun sound(adts: ByteArray, streamUs: Long)
 
     /** The source cannot feed the recording after all; the recording ends, saying why. */
     fun trouble(why: String)
@@ -33,11 +40,16 @@ interface RecordSink {
  * new run is pinned to the wall clock, so the gap in the file is as long as
  * the gap really was. Each run starts at a keyframe: what came before one is
  * built on pictures the file never saw.
+ *
+ * The sound rides the picture's runs: it is stamped on the same source clock,
+ * so the picture's offset places it too, and it waits for the picture to pin
+ * each run before it is written.
  */
 internal class RecordingClock(private val startedAtUs: Long) {
     private var lastStreamUs: Long? = null
     private var offsetUs = 0L
     private var lastUs = -FRAME_US // nothing recorded: the first pin is free
+    private var lastSoundUs = Long.MIN_VALUE
     private var needKey = true
     private var rebase = true
 
@@ -46,6 +58,22 @@ internal class RecordingClock(private val startedAtUs: Long) {
     /** A file being appended to already runs to [us]; nothing goes before it. */
     fun notBefore(us: Long) {
         lastUs = maxOf(lastUs, us)
+        lastSoundUs = maxOf(lastSoundUs, us)
+    }
+
+    /**
+     * A sound frame's time from the recording's start in µs, or null to skip
+     * it: before the picture has pinned the run it belongs to, from a stretch
+     * of the clock the picture is not on (an old run's last frames, queued
+     * behind the new one's keyframe), or not after the sound already written.
+     */
+    fun placeSound(streamUs: Long): Long? {
+        val last = lastStreamUs ?: return null
+        if (rebase || kotlin.math.abs(streamUs - last) > MAX_STEP_US) return null
+        val t = streamUs + offsetUs
+        if (t <= lastSoundUs) return null
+        lastSoundUs = t
+        return t
     }
 
     /** Frames went missing on the way here; carry on from the next keyframe. */
@@ -117,6 +145,8 @@ class StreamRecorder(
         val afterGap: Boolean
     )
 
+    private class Sound(val data: ByteArray, val streamUs: Long)
+
     private val queue = LinkedBlockingQueue<Any>()
     private val queuedBytes = AtomicLong()
     @Volatile private var open = true
@@ -142,6 +172,14 @@ class StreamRecorder(
         dropped = false
         queuedBytes.addAndGet(annexB.size.toLong())
         queue.offer(Frame(codec, annexB, streamUs, key, parameterSets, clockUs(), afterGap))
+    }
+
+    // past the bound a sound frame is simply lost: the picture's gap is what
+    // the timeline mends, and the sound carries on from wherever it resumes
+    override fun sound(adts: ByteArray, streamUs: Long) {
+        if (!open || queuedBytes.get() + adts.size > MAX_QUEUED) return
+        queuedBytes.addAndGet(adts.size.toLong())
+        queue.offer(Sound(adts, streamUs))
     }
 
     override fun trouble(why: String) = end(why)
@@ -173,18 +211,31 @@ class StreamRecorder(
                     while (true) {
                         val next = queue.poll(1, TimeUnit.SECONDS)
                         if (next === CLOSE) break
-                        if (next is Frame) {
-                            queuedBytes.addAndGet(-next.data.size.toLong())
-                            if (next.afterGap) {
-                                clock.lost()
-                                DebugLog.note("Video", "record fell behind, frames dropped")
+                        when (next) {
+                            is Frame -> {
+                                queuedBytes.addAndGet(-next.data.size.toLong())
+                                if (next.afterGap) {
+                                    clock.lost()
+                                    DebugLog.note("Video", "record fell behind, frames dropped")
+                                }
+                                val t = clock.place(next.streamUs, next.arrivalUs, next.key)
+                                if (t != null) {
+                                    muxer.frame(
+                                        next.codec, next.data, t * 9 / 100, next.key,
+                                        next.parameterSets, clock.tookDiscontinuity()
+                                    )
+                                }
                             }
-                            val t = clock.place(next.streamUs, next.arrivalUs, next.key)
-                            if (t != null) {
-                                muxer.frame(
-                                    next.codec, next.data, t * 9 / 100, next.key,
-                                    next.parameterSets, clock.tookDiscontinuity()
-                                )
+                            is Sound -> {
+                                queuedBytes.addAndGet(-next.data.size.toLong())
+                                // Declared on sight, before the run is pinned
+                                // and the frame can be placed: the sound usually
+                                // beats the first keyframe here, and the tables
+                                // that go out with that keyframe are the only
+                                // ones some players ever read — ExoPlayer takes
+                                // a file's first stream list as final.
+                                muxer.withSound()
+                                clock.placeSound(next.streamUs)?.let { muxer.sound(next.data, it * 9 / 100) }
                             }
                         }
                         val now = clockUs()

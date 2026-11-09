@@ -725,8 +725,12 @@ class VideoPane(
         // recording opens now and the next source joins it as it starts.
         videoSource?.record(recorder)
         DebugLog.note("Video", "record start ${file.name}")
+        // No promise of sound: whether a stream's sound reaches the file is
+        // known only once it plays — an RTSP camera may carry no sound at all.
         Toast.makeText(
-            activity, "Recording the picture, without sound, to Movies/Groundtrack",
+            activity,
+            if (videoSource?.hasAudio == true) "Recording to Movies/Groundtrack, with the sound while it is on"
+            else "Recording the picture, without sound, to Movies/Groundtrack",
             Toast.LENGTH_SHORT
         ).show()
     }

@@ -249,7 +249,7 @@ internal class BitmapEncoder(width: Int, height: Int) :
     }
 }
 
-private fun ByteBuffer.bytes(): ByteArray = ByteArray(remaining()).also { duplicate().get(it) }
+internal fun ByteBuffer.bytes(): ByteArray = ByteArray(remaining()).also { duplicate().get(it) }
 
 /**
  * Frame times for a source that sends none. A camera keeps a steady beat,

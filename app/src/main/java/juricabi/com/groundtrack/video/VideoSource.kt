@@ -79,7 +79,8 @@ interface VideoSource {
     /**
      * The recording to feed from now on, or null to stop. Set on the UI
      * thread, before or after start; the frames go out from the source's own.
-     * Every source records — a new one must say how.
+     * Every source records — a new one must say how. A source with sound
+     * feeds that too, while it is on: the recording keeps what is heard.
      */
     fun record(sink: RecordSink?)
 }

@@ -26,15 +26,19 @@ issues and reviews use these terms as written here.
 - **VideoSource** (`video/VideoSource.kt`) — the seam a picture arrives
   through; four adapters (RTSP, MJPEG, UDP/RTP, USB UVC). Rotation crosses
   this seam as a question the source asks back (`turn`); sources never read
-  settings. Every source can hand its picture to a recording (`record`).
+  settings. Every source can hand its picture to a recording (`record`), and
+  its sound while that is on.
 - **Video recording** (`video/StreamRecorder.kt`, `video/TsMuxer.kt`,
   `video/H264Encoder.kt`) — the live picture written to `Movies/Groundtrack`
   as an MPEG transport stream; not to be confused with the flight's own
   recording, the `.tlm` log. Sources that arrive compressed (RTSP, UDP/RTP)
   are copied as they came; the others (USB, MJPEG) go through the hardware
-  encoder, their times smoothed by a `FrameClock`. Never turned. The
-  recorder writes on a thread of its own; `RecordingClock` lays every run of
-  a stream on one timeline, and a rebuilt screen appends to the same file.
+  encoder, their times smoothed by a `FrameClock`. Never turned. The sound,
+  while it is on, goes in as AAC through `SoundEncoder` (`video/SoundEncoder.kt`)
+  — PCM either way: USB's off the receiver's audio input, RTSP's as the player
+  hands it to the speaker. The recorder writes on a thread of its own;
+  `RecordingClock` lays every run of a stream on one timeline, the sound riding
+  the picture's, and a rebuilt screen appends to the same file.
 - **PhoneWatcher** (`service/PhoneWatcher.kt`) — where the phone is and which
   way it faces: sensing, fix arbitration (`worthBelieving`), the background
   compass wake lock. What is written down stays with the service.

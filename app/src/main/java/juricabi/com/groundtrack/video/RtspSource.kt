@@ -7,6 +7,7 @@ import android.view.SurfaceView
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -21,12 +22,15 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.FormatHolder
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
+import java.nio.ByteBuffer
 import juricabi.com.groundtrack.utils.DebugLog
 
 /**
@@ -454,7 +458,8 @@ class RtspSource(
  *
  * The same renderer hands each compressed sample to [recording] as it goes
  * into the codec — the stream exactly as it came, so a recording costs a
- * copy and never an encoder.
+ * copy and never an encoder. The sound, when it is on, reaches the recording
+ * from the speaker's side ([RecordingAudioSink]).
  */
 @OptIn(UnstableApi::class)
 private class RotatingRenderersFactory(
@@ -479,7 +484,7 @@ private class RotatingRenderersFactory(
             ) {
                 override fun getMediaCodecConfiguration(
                     codecInfo: MediaCodecInfo,
-                    format: androidx.media3.common.Format,
+                    format: Format,
                     crypto: android.media.MediaCrypto?,
                     codecOperatingRate: Float,
                 ): MediaCodecAdapter.Configuration {
@@ -534,5 +539,69 @@ private class RotatingRenderersFactory(
                 }
             }
         )
+    }
+
+    override fun buildAudioSink(
+        context: Context,
+        enableFloatOutput: Boolean,
+        enableAudioTrackPlaybackParams: Boolean,
+    ): AudioSink? = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+        ?.let { RecordingAudioSink(it, recording) }
+}
+
+/**
+ * The speaker's sound on its way out, handed to [recording] as the PCM the
+ * player decoded — so a stream's sound is recorded whatever codec it came in,
+ * AAC, G.711 or Opus alike, stamped on the player's clock, which is the one
+ * the picture's samples carry. The sink is offered a buffer again until it has
+ * taken all of it; only the first offer is recorded. Every call is on the
+ * player's playback thread.
+ */
+@OptIn(UnstableApi::class)
+private class RecordingAudioSink(
+    sink: AudioSink,
+    private val recording: () -> RecordSink?,
+) : ForwardingAudioSink(sink) {
+    private val sound = SoundTap("rtsp")
+    private var pcm: Format? = null
+    private var offeredAgain = false
+
+    override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+        super.configure(inputFormat, specifiedBufferSize, outputChannels)
+        // 16-bit PCM is what the decoders hand the speaker; anything else is
+        // left out of the recording rather than written into it as noise
+        pcm = inputFormat.takeIf {
+            it.sampleMimeType == MimeTypes.AUDIO_RAW && it.pcmEncoding == C.ENCODING_PCM_16BIT
+        }
+        if (pcm == null) DebugLog.note(
+            "Video", "rtsp sound ${inputFormat.sampleMimeType} pcm=${inputFormat.pcmEncoding} cannot be recorded"
+        )
+    }
+
+    override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
+        val f = pcm
+        // before the hand-on, which moves the buffer on as it is taken
+        if (!offeredAgain && f != null) {
+            sound.pcm(buffer, f.sampleRate, f.channelCount, presentationTimeUs, recording())
+        }
+        val taken = super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        offeredAgain = !taken
+        return taken
+    }
+
+    override fun flush() {
+        offeredAgain = false
+        super.flush()
+    }
+
+    override fun reset() {
+        offeredAgain = false
+        sound.release()
+        super.reset()
+    }
+
+    override fun release() {
+        sound.release()
+        super.release()
     }
 }

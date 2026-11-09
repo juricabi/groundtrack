@@ -3,8 +3,9 @@ package juricabi.com.groundtrack.video
 import java.io.OutputStream
 
 /**
- * Just enough MPEG transport stream to carry one H.264 or H.265 picture: the
- * stream as it arrived, access unit by access unit, never re-encoded.
+ * Just enough MPEG transport stream to carry one H.264 or H.265 picture — the
+ * stream as it arrived, access unit by access unit, never re-encoded — and
+ * the sound beside it, AAC in ADTS frames, when there is any.
  *
  * TS, not MP4, because a recording here ends however the flight ends. An MP4
  * is unreadable until its index is written at the very end, so a kill, a flat
@@ -25,6 +26,9 @@ internal class TsMuxer(private val out: OutputStream) {
     private var patCounter = 0
     private var pmtCounter = 0
     private var videoCounter = 0
+    private var soundCounter = 0
+    private var soundDeclared = false
+    private var soundSent = false
 
     /**
      * One access unit, Annex B. [time90k] is its place on the recording's
@@ -44,10 +48,7 @@ internal class TsMuxer(private val out: OutputStream) {
             this.codec = codec
             pmtVersion = (pmtVersion + 1) and 0x1F
         }
-        if (key) {
-            writeSection(PAT_PID, pat())
-            writeSection(PMT_PID, pmt(codec))
-        }
+        if (key) writeTables(codec)
         // The delimiter opens the access unit, the parameter sets follow it:
         // a unit already led by its own delimiter keeps it first, and a set
         // the source gave only out of band is slotted in right after.
@@ -57,7 +58,7 @@ internal class TsMuxer(private val out: OutputStream) {
         val lead = if (ownAud) annexB.copyOfRange(0, split) else aud(codec)
         val sets = if (key && units.none { it.second == spsType(codec) })
             parameterSets.map(::annexB) else emptyList()
-        val header = pesHeader((time90k + PTS_LEAD) and MASK_33)
+        val header = pesHeader(VIDEO_STREAM, (time90k + PTS_LEAD) and MASK_33, 0)
         val payload = ByteArray(
             header.size + lead.size + sets.sumOf { it.size } + annexB.size - split
         )
@@ -67,34 +68,66 @@ internal class TsMuxer(private val out: OutputStream) {
             at += part.size
         }
         System.arraycopy(annexB, split, payload, at, annexB.size - split)
-        writePes(payload, time90k and MASK_33, key, discontinuity)
+        writePes(VIDEO_PID, payload, time90k and MASK_33, key, discontinuity)
     }
 
-    private fun writePes(payload: ByteArray, pcr: Long, key: Boolean, discontinuity: Boolean) {
+    /**
+     * The recording has sound from here on. The tables say so from now, and
+     * go out again at once if a picture was already sent under tables that
+     * did not; nothing is declared before it is seen, since a player stalls
+     * waiting on a declared stream that never comes.
+     */
+    fun withSound() {
+        if (soundDeclared) return
+        soundDeclared = true
+        pmtVersion = (pmtVersion + 1) and 0x1F
+        codec?.let(::writeTables)
+    }
+
+    /** One ADTS frame of the sound, at [time90k] on the picture's clock. */
+    fun sound(adts: ByteArray, time90k: Long) {
+        withSound()
+        val header = pesHeader(SOUND_STREAM, (time90k + PTS_LEAD) and MASK_33, 8 + adts.size)
+        // the muxer's first, like its first tables: an appended file's sound
+        // ran on counters this one starts over
+        writePes(SOUND_PID, header + adts, null, false, discontinuity = !soundSent)
+        soundSent = true
+    }
+
+    private fun writeTables(codec: RtpCodec) {
+        writeSection(PAT_PID, pat())
+        writeSection(PMT_PID, pmt(codec))
+    }
+
+    /**
+     * One PES over as many packets as it takes, the last stuffed to a whole
+     * packet. The first carries the flags, and the PCR when there is one —
+     * only the picture's are, the sound keeping to its clock.
+     */
+    private fun writePes(pid: Int, payload: ByteArray, pcr: Long?, key: Boolean, discontinuity: Boolean) {
         var pos = 0
         var first = true
         while (pos < payload.size) {
+            val flags = if (!first) 0 else
+                (if (discontinuity) 0x80 else 0) or (if (key) 0x40 else 0) or (if (pcr != null) 0x10 else 0)
             // -1: no adaptation field; otherwise its length byte's value
-            var adaptation = if (first) 7 else -1 // flags + PCR
+            var adaptation = when {
+                flags and 0x10 != 0 -> 7 // flags + PCR
+                flags != 0 -> 1
+                else -> -1
+            }
             val room = PAYLOAD - (if (adaptation >= 0) adaptation + 1 else 0)
             val chunk = minOf(room, payload.size - pos)
             val stuffing = room - chunk
             if (stuffing > 0) adaptation = if (adaptation < 0) stuffing - 1 else adaptation + stuffing
-            header(VIDEO_PID, first, adaptation >= 0, videoCounter)
-            videoCounter = (videoCounter + 1) and 0x0F
+            header(pid, first, adaptation >= 0, nextCounter(pid))
             var i = 4
             if (adaptation >= 0) {
                 packet[i++] = adaptation.toByte()
                 if (adaptation > 0) {
                     val end = i + adaptation
-                    var flags = 0
-                    if (first) {
-                        if (discontinuity) flags = flags or 0x80
-                        if (key) flags = flags or 0x40
-                        flags = flags or 0x10
-                    }
                     packet[i++] = flags.toByte()
-                    if (first) {
+                    if (pcr != null && first) {
                         packet[i++] = (pcr shr 25).toByte()
                         packet[i++] = (pcr shr 17).toByte()
                         packet[i++] = (pcr shr 9).toByte()
@@ -111,6 +144,10 @@ internal class TsMuxer(private val out: OutputStream) {
             first = false
         }
     }
+
+    private fun nextCounter(pid: Int): Int =
+        if (pid == VIDEO_PID) videoCounter.also { videoCounter = (it + 1) and 0x0F }
+        else soundCounter.also { soundCounter = (it + 1) and 0x0F }
 
     private fun writeSection(pid: Int, section: ByteArray) {
         val counter = if (pid == PAT_PID) patCounter++ else pmtCounter++
@@ -145,11 +182,13 @@ internal class TsMuxer(private val out: OutputStream) {
         0x02, 0x0001, pmtVersion,
         byteArrayOf(
             (0xE0 or (VIDEO_PID shr 8)).toByte(), VIDEO_PID.toByte(), // PCR rides the video
-            0xF0.toByte(), 0x00,
-            (if (codec == RtpCodec.H264) 0x1B else 0x24).toByte(),
-            (0xE0 or (VIDEO_PID shr 8)).toByte(), VIDEO_PID.toByte(),
             0xF0.toByte(), 0x00
-        )
+        ) + stream(if (codec == RtpCodec.H264) 0x1B else 0x24, VIDEO_PID) +
+            (if (soundDeclared) stream(0x0F, SOUND_PID) else ByteArray(0)) // 0x0F: AAC in ADTS
+    )
+
+    private fun stream(type: Int, pid: Int) = byteArrayOf(
+        type.toByte(), (0xE0 or (pid shr 8)).toByte(), pid.toByte(), 0xF0.toByte(), 0x00
     )
 
     private fun section(table: Int, id: Int, version: Int, body: ByteArray): ByteArray {
@@ -169,9 +208,10 @@ internal class TsMuxer(private val out: OutputStream) {
         return s
     }
 
-    private fun pesHeader(pts: Long) = byteArrayOf(
-        0, 0, 1, 0xE0.toByte(),
-        0, 0, // unbounded, as video may be
+    /** [length] is what follows its own field: 0 says unbounded, which only video may be. */
+    private fun pesHeader(stream: Int, pts: Long, length: Int) = byteArrayOf(
+        0, 0, 1, stream.toByte(),
+        (length shr 8).toByte(), length.toByte(),
         0x80.toByte(), 0x80.toByte(), 5, // PTS only: these streams carry no B-frames
         (0x21 or ((pts shr 29).toInt() and 0x0E)).toByte(),
         (pts shr 22).toByte(),
@@ -186,6 +226,9 @@ internal class TsMuxer(private val out: OutputStream) {
         const val PAT_PID = 0x0000
         const val PMT_PID = 0x1000
         const val VIDEO_PID = 0x0100
+        const val SOUND_PID = 0x0101
+        private const val VIDEO_STREAM = 0xE0
+        private const val SOUND_STREAM = 0xC0
         private const val MASK_33 = (1L shl 33) - 1
         // the PTS runs a tenth of a second ahead of the PCR: the decoder's
         // buffer is given that long to hold a frame before it is due

@@ -21,49 +21,6 @@ class TsMuxerTest {
     private fun idr(size: Int) = byteArrayOf(0, 0, 0, 1, 0x65) + ByteArray(size) { (it % 251 + 1).toByte() }
     private fun slice(size: Int) = byteArrayOf(0, 0, 0, 1, 0x41) + ByteArray(size) { (it % 7 + 1).toByte() }
 
-    private class Packet(val bytes: ByteArray) {
-        val start get() = bytes[1].toInt() and 0x40 != 0
-        val pid get() = (bytes[1].toInt() and 0x1F shl 8) or (bytes[2].toInt() and 0xFF)
-        val counter get() = bytes[3].toInt() and 0x0F
-        val adaptation get() = bytes[3].toInt() and 0x20 != 0
-        val adaptationLength get() = if (adaptation) bytes[4].toInt() and 0xFF else -1
-        val flags get() = if (adaptationLength > 0) bytes[5].toInt() and 0xFF else 0
-        val payload: ByteArray
-            get() = bytes.copyOfRange(4 + if (adaptation) adaptationLength + 1 else 0, 188)
-        val pcr: Long
-            get() {
-                val b = { i: Int -> bytes[6 + i].toLong() and 0xFF }
-                return (b(0) shl 25) or (b(1) shl 17) or (b(2) shl 9) or (b(3) shl 1) or (b(4) shr 7)
-            }
-    }
-
-    private fun packets(ts: ByteArray): List<Packet> {
-        assertEquals("whole packets only", 0, ts.size % 188)
-        return (0 until ts.size / 188).map { Packet(ts.copyOfRange(it * 188, it * 188 + 188)) }
-            .onEach { assertEquals(0x47, it.bytes[0].toInt()) }
-    }
-
-    /** The PES packets on the video PID, each reassembled whole. */
-    private fun pes(packets: List<Packet>): List<ByteArray> {
-        val out = ArrayList<ByteArray>()
-        var current: ByteArrayOutputStream? = null
-        for (p in packets.filter { it.pid == TsMuxer.VIDEO_PID }) {
-            if (p.start) {
-                current?.let { out += it.toByteArray() }
-                current = ByteArrayOutputStream()
-            }
-            current!!.write(p.payload)
-        }
-        current?.let { out += it.toByteArray() }
-        return out
-    }
-
-    private fun pts(pes: ByteArray): Long {
-        val b = { i: Int -> pes[9 + i].toLong() and 0xFF }
-        return ((b(0) shr 1 and 0x07) shl 30) or (b(1) shl 22) or ((b(2) shr 1) shl 15) or
-            (b(3) shl 7) or (b(4) shr 1)
-    }
-
     private fun mux(block: TsMuxer.() -> Unit): ByteArray =
         ByteArrayOutputStream().also { TsMuxer(it).block() }.toByteArray()
 
@@ -89,15 +46,95 @@ class TsMuxerTest {
         for ((codec, type) in listOf(RtpCodec.H264 to 0x1B, RtpCodec.H265 to 0x24)) {
             val ts = mux { frame(codec, idr(10), 0, true, emptyList(), false) }
             val packets = packets(ts)
-            for (table in packets.take(2)) {
-                val section = table.payload.copyOfRange(1, table.payload.size)
-                val length = (section[1].toInt() and 0x0F shl 8) or (section[2].toInt() and 0xFF)
-                // the MPEG CRC over a section including its own CRC is zero
-                assertEquals(0, TsMuxer.crc32(section, 3 + length))
-            }
-            val pmt = packets[1].payload
-            assertEquals(type, pmt[1 + 12].toInt() and 0xFF)
+            assertTablesValid(packets.take(2))
+            // nothing but the picture: no sound is declared that never came
+            assertEquals(listOf(type to TsMuxer.VIDEO_PID), streams(packets[1]))
         }
+    }
+
+    private fun assertTablesValid(tables: List<Packet>) {
+        for (table in tables) {
+            val section = section(table)
+            val length = (section[1].toInt() and 0x0F shl 8) or (section[2].toInt() and 0xFF)
+            // the MPEG CRC over a section including its own CRC is zero
+            assertEquals(0, TsMuxer.crc32(section, 3 + length))
+        }
+    }
+
+    // a 48 kHz mono AAC-LC frame
+    private fun aacFrame(size: Int) = adts(byteArrayOf(0x11, 0x88.toByte()), ByteArray(size) { (it + 1).toByte() })
+    private val aac = aacFrame(100)
+
+    @Test
+    fun soundRidesItsOwnPidOnThePicturesClock() {
+        val ts = mux {
+            frame(RtpCodec.H264, idr(100), 90_000, true, listOf(sps, pps), true)
+            sound(aac, 90_000)
+            sound(aac, 91_920)
+        }
+        val packets = packets(ts)
+        val sounds = pes(packets, TsMuxer.SOUND_PID)
+        assertEquals(2, sounds.size)
+        for (body in sounds) {
+            // an audio stream, its length bounded, the frame carried whole
+            assertArrayEquals(byteArrayOf(0, 0, 1, 0xC0.toByte()), body.copyOfRange(0, 4))
+            val length = (body[4].toInt() and 0xFF shl 8) or (body[5].toInt() and 0xFF)
+            assertEquals(8 + aac.size, length)
+            assertArrayEquals(aac, body.copyOfRange(14, 6 + length))
+        }
+        // the same lead as the picture's, so the two play together
+        assertEquals(listOf(99_000L, 100_920L), sounds.map(::pts))
+        assertEquals(99_000L, pts(pes(packets).single()))
+        // the sound carries no clock of its own
+        assertTrue(packets.filter { it.pid == TsMuxer.SOUND_PID }.none { it.flags and 0x10 != 0 })
+    }
+
+    @Test
+    fun soundJoiningAfterThePictureSendsTheTablesAgainAtOnce() {
+        val packets = packets(mux {
+            frame(RtpCodec.H264, idr(100), 0, true, listOf(sps, pps), true)
+            frame(RtpCodec.H264, slice(100), 3000, false, emptyList(), false)
+            sound(aac, 3000)
+        })
+        val pmts = packets.filter { it.pid == TsMuxer.PMT_PID }
+        assertEquals(2, pmts.size)
+        assertTablesValid(packets.filter { it.pid == TsMuxer.PAT_PID || it.pid == TsMuxer.PMT_PID })
+        assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts[1]))
+        // a new version, so a player reading the tables again takes it up
+        val version = { p: Packet -> section(p)[5].toInt() shr 1 and 0x1F }
+        assertTrue(version(pmts[0]) != version(pmts[1]))
+        // and the tables go out before the sound they announce
+        val firstSound = packets.indexOfFirst { it.pid == TsMuxer.SOUND_PID }
+        assertTrue(packets.indexOf(pmts[1]) < firstSound)
+    }
+
+    @Test
+    fun soundSeenBeforeThePictureIsInItsFirstTables() {
+        val packets = packets(mux {
+            withSound()
+            frame(RtpCodec.H264, idr(100), 0, true, listOf(sps, pps), true)
+        })
+        // one set of tables, the picture's, and they already say sound
+        val pmts = packets.filter { it.pid == TsMuxer.PMT_PID }
+        assertEquals(1, pmts.size)
+        assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID, 0x0F to TsMuxer.SOUND_PID), streams(pmts[0]))
+    }
+
+    @Test
+    fun soundOfEverySizeIsWholeAndOnlyItsFirstIsARestart() {
+        val sizes = listOf(1, 160, 161, 162, 163, 168, 169, 170, 171, 400)
+        val packets = packets(mux {
+            frame(RtpCodec.H264, idr(10), 0, true, emptyList(), false)
+            for (size in sizes) sound(aacFrame(size), 0)
+        })
+        // around the first packet's 182 bytes of room (its restart flag takes
+        // two) and the 184 after; the frame back whole, the stuffing all outside it
+        assertEquals(sizes.map { aacFrame(it).toList() }, pes(packets, TsMuxer.SOUND_PID).map {
+            it.copyOfRange(14, it.size).toList()
+        })
+        val starts = packets.filter { it.pid == TsMuxer.SOUND_PID && it.start }
+        assertEquals(0x80, starts.first().flags and 0x80)
+        assertTrue(starts.drop(1).all { it.flags and 0x80 == 0 })
     }
 
     @Test
@@ -129,7 +166,10 @@ class TsMuxerTest {
     @Test
     fun continuityCountsOnPerPid() {
         val ts = mux {
-            repeat(40) { frame(RtpCodec.H264, if (it % 10 == 0) idr(900) else slice(400), it * 3000L, it % 10 == 0, listOf(sps, pps), false) }
+            repeat(40) {
+                frame(RtpCodec.H264, if (it % 10 == 0) idr(900) else slice(400), it * 3000L, it % 10 == 0, listOf(sps, pps), false)
+                if (it > 4) sound(aac, it * 3000L)
+            }
         }
         packets(ts).groupBy { it.pid }.forEach { (pid, list) ->
             list.zipWithNext().forEach { (a, b) ->
