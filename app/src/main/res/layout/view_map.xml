@@ -213,6 +213,17 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
+        <!-- First, so it is drawn under every other overlay: in a short map
+             half — landscape, or a replay's controls lifting the message
+             line — the message tab and its line rise into the horizon's
+             corner, and drawn over them it hid the way into the history. -->
+        <juricabi.com.groundtrack.ui.HorizonView
+                android:id="@+id/horizon_view"
+                android:layout_width="128dp"
+                android:layout_height="128dp"
+                android:layout_alignParentTop="true"
+                android:layout_margin="8dp" />
+
         <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/play_button"
                 android:layout_width="wrap_content"
@@ -274,6 +285,7 @@
                 android:layout_marginEnd="8dp"
                 android:layout_marginBottom="-12dp"
                 android:ellipsize="end"
+                android:maxLines="2"
                 android:gravity="left"
                 android:text="Ready"
                 android:textColor="@android:color/white"
@@ -302,13 +314,6 @@
                 android:textStyle="bold"
                 app:outlineColor="@android:color/black"
                 app:outlineSize="3dp" />
-
-        <juricabi.com.groundtrack.ui.HorizonView
-                android:id="@+id/horizon_view"
-                android:layout_width="128dp"
-                android:layout_height="128dp"
-                android:layout_alignParentTop="true"
-                android:layout_margin="8dp" />
 
         <juricabi.com.groundtrack.ui.TextViewOutline
                 android:id="@+id/clock_text"
