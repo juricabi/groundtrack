@@ -48,7 +48,7 @@ class CrsfDataDecoder(listener: Listener) : DataDecoder(listener) {
      * else went on calling itself plain CRSF.
      */
     private val passthroughWords = setOf(
-        Protocol.ARDU_TEXT, Protocol.ARDU_ATTITUDE, Protocol.ARDU_VEL_YAW,
+        Protocol.ARDU_ATTITUDE, Protocol.ARDU_VEL_YAW,
         Protocol.ARDU_AP_STATUS, Protocol.ARDU_GPS_STATUS, Protocol.ARDU_HOME,
         Protocol.ARDU_BATT_2, Protocol.ARDU_BATT_1, Protocol.ARDU_PARAM
     )

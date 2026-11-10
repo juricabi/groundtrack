@@ -21,6 +21,11 @@ Two additions ride on the same flight model:
     --protocol mavlink-hl  send MAVLink HIGH_LATENCY2 instead of CRSF: one
                            42-byte message every --hl-period seconds, which
                            is the whole of what a satellite link carries
+    --protocol sport       send FrSky S.Port instead, as ArduPilot answers a
+                           FrSky receiver: the position in FrSky's GPS sensor,
+                           the rest in passthrough words, and the same status
+                           text, four characters to a word, each word four
+                           times over
 
     --dump FILE --seconds N   write the byte stream to a file instead of the
                               network, on a fixed clock — the app's unit
@@ -249,6 +254,73 @@ def ap_text_frame(severity, text):
                  + text.encode("ascii")[:49] + b"\x00")
 
 
+# ------------------------------------------- FrSky S.Port, ArduPilot passthrough
+
+SPORT_START = 0x7E
+SPORT_STUFF = 0x7D
+SPORT_DATA = 0x10
+# the id ArduPilot answers polls on; 0x1B is never itself a byte to stuff
+SPORT_SENSOR = 0x1B
+SPORT_GPS = 0x0800
+SPORT_TEXT = 0x5000
+
+
+def sport_frame(appid, value):
+    """One data frame as the receiver hands it on: marker, sensor id, then the
+    body and its sum, 0x7E and 0x7D escaped. Little-endian, as the autopilot
+    copies it out."""
+    body = struct.pack("<BHI", SPORT_DATA, appid, value & 0xFFFFFFFF)
+    total = 0
+    for b in body:
+        total += b
+        total += total >> 8
+        total &= 0xFF
+    out = bytearray([SPORT_START, SPORT_SENSOR])
+    for b in body + bytes([0xFF - total]):
+        if b in (SPORT_START, SPORT_STUFF):
+            out += bytes([SPORT_STUFF, b ^ 0x20])
+        else:
+            out.append(b)
+    return bytes(out)
+
+
+def sport_gps_frames(lat, lon):
+    """FrSky's GPS sensor: minutes times 10 000, a sign bit, and the top bit
+    telling longitude from latitude — one frame each."""
+    def word(degrees, longitude):
+        value = int(round(abs(degrees) * 600000)) & 0x3FFFFFFF
+        if degrees < 0:
+            value |= 0x40000000
+        if longitude:
+            value |= 0x80000000
+        return value
+    return sport_frame(SPORT_GPS, word(lon, True)) + sport_frame(SPORT_GPS, word(lat, False))
+
+
+def sport_text_words(severity, text):
+    """ArduPilot's words for a status text (get_next_msg_chunk): four
+    characters to a word, the first in the top byte, at most fifty of them;
+    the last word is the one with an empty slot, the severity in the tops of
+    its three low bytes — a word of severity alone after a multiple of four."""
+    text = text.encode("ascii")[:50]
+    words = []
+    at = 0
+    while True:
+        word = 0
+        end = False
+        for k in range(4):
+            if at >= len(text):
+                end = True
+                break
+            word |= text[at] << ((3 - k) * 8)
+            at += 1
+        if end or at == 50:
+            words.append(word | ((severity & 4) << 21) | ((severity & 2) << 14)
+                         | ((severity & 1) << 7))
+            return words
+        words.append(word)
+
+
 # ------------------------------------------- MAVLink HIGH_LATENCY2 framing
 
 HL2_ID = 235
@@ -473,7 +545,7 @@ def main():
     parser.add_argument("--passthrough", action="store_true",
                         help="weave ArduPilot passthrough frames into the CRSF "
                              "stream, as ArduPilot over ELRS sends them")
-    parser.add_argument("--protocol", choices=("crsf", "mavlink-hl"),
+    parser.add_argument("--protocol", choices=("crsf", "mavlink-hl", "sport"),
                         default="crsf")
     parser.add_argument("--mavlink-version", type=int, choices=(1, 2), default=2)
     parser.add_argument("--texts", action="store_true",
@@ -623,6 +695,8 @@ def main():
     passthrough_turn = 0
     hl_seq = 0
     text_id = 0
+    # S.Port text words waiting their turn, each already four times over
+    sport_text = []
 
     enabled = not args.wait_enable
     if dump is None:
@@ -780,6 +854,42 @@ def main():
                              if args.mavlink_version == 2 else
                              mav1_frame(hl_seq, body, STATUSTEXT_ID, STATUSTEXT_CRC_EXTRA))
                         hl_seq += 1
+            if dump is None:
+                time.sleep(0.04)
+            continue
+
+        if args.protocol == "sport":
+            # One frame per poll, as the receiver asks the autopilot: FrSky's
+            # GPS sensor for the position, passthrough words for the rest,
+            # and while any text waits it takes the poll, a word four times
+            # over — the line every 5 s and the failed checks every 20 s, the
+            # same as --passthrough sends over CRSF.
+            if now - last["text"] >= 5.0:
+                last["text"] = now
+                for word in sport_text_words(6, "SimFlight passthrough alive"):
+                    sport_text.extend([word] * 4)
+            if now - last["burst"] >= 20.0:
+                last["burst"] = now
+                for severity, text in PREARM_BURST:
+                    for word in sport_text_words(severity, text):
+                        sport_text.extend([word] * 4)
+            if now - last["gps"] >= 0.2:
+                last["gps"] = now
+                send(sport_gps_frames(lat, lon))
+            if sport_text:
+                send(sport_frame(SPORT_TEXT, sport_text.pop(0)))
+            bearing = (math.degrees(math.atan2(-east, -north))) % 360
+            words = [
+                (0x5001, ap_status_word(5, t > 8, 38)),
+                (0x5002, gps_status_word(14, True, altitude)),
+                (0x5003, battery_word(volts, amps, used_mah)),
+                (0x5004, home_word(distance, climb, bearing)),
+                (0x5005, vel_yaw_word(vspeed, speed, heading)),
+                (0x5006, attitude_word(roll, pitch)),
+            ]
+            appid, word = words[passthrough_turn % len(words)]
+            passthrough_turn += 1
+            send(sport_frame(appid, word))
             if dump is None:
                 time.sleep(0.04)
             continue

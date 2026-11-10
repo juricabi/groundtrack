@@ -54,7 +54,6 @@ abstract class Protocol(val dataDecoder: DataDecoder) {
         const val GPS_STATE_ARDU = 44
         //ardupilot S.PORT passthrough  Data ID's
         const val RxBt = 45
-        const val ARDU_TEXT = 46
         const val ARDU_ATTITUDE = 47
         const val ARDU_VEL_YAW = 48
         const val ARDU_AP_STATUS = 49

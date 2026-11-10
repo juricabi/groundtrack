@@ -85,6 +85,38 @@ class LogPlayerMessagesTest {
         assertEquals(3, player.messagesBefore(size).size)
     }
 
+    /** An S.Port data frame: marker, sensor id, then the stuffed body and its sum. */
+    private fun sport(appId: Int, value: Int): ByteArray {
+        val body = intArrayOf(
+            0x10, appId and 0xFF, appId shr 8,
+            value and 0xFF, (value ushr 8) and 0xFF, (value ushr 16) and 0xFF, value ushr 24
+        )
+        var sum = 0
+        for (b in body) { sum += b; sum += sum shr 8; sum = sum and 0xFF }
+        val out = arrayListOf(0x7E, 0x1B)
+        for (b in body + (0xFF - sum)) {
+            if (b == 0x7E || b == 0x7D) { out.add(0x7D); out.add(b xor 0x20) } else out.add(b)
+        }
+        return ByteArray(out.size) { out[it].toByte() }
+    }
+
+    private fun sportGps(step: Int): ByteArray =
+        sport(0x0800, (450000 + step) * 60) + sport(0x0800, (150000 * 60) or 0x80000000.toInt())
+
+    @Test
+    fun aFrskyLinksTextIsGatheredForTheReplay() {
+        // "Hi" at ERROR and "ABCD" at WARNING, each word sent over and over
+        val words = listOf(0x48698080, 0x41424344, 0x00800000)
+        var step = 0
+        val log = List(20) { sportGps(step++) }.reduce(ByteArray::plus) +
+            words.flatMap { word -> List(4) { sport(0x5000, word) + sportGps(step++) } }.reduce(ByteArray::plus) +
+            List(20) { sportGps(step++) }.reduce(ByteArray::plus)
+        val (player, _) = load(log, Screen())
+        val all = player.messages()
+        assertEquals(listOf("Hi", "ABCD"), all.map { it.text })
+        assertEquals(listOf(3, 4), all.map { it.severity })
+    }
+
     @Test
     fun askedWhileTheLogWasStillLoadingTheMessagesAreThereOnceItHas() {
         val log = List(5) { gps(it) }.reduce(ByteArray::plus) + text(4, "Battery 1 low") + gps(5)

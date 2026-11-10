@@ -97,6 +97,8 @@ class FrSkySportProtocol : Protocol {
         const val MP_ENVELOPE_DATA_LENGTH = 0x9 //multiprotocol module header packet length
 
         private val TAG: String = "FrSky Protocol"
+        // the most of a status text that travels over passthrough
+        private const val TEXT_LENGTH = 50
     }
 
     override fun process(data: Int) {
@@ -482,11 +484,7 @@ class FrSkySportProtocol : Protocol {
                                 Protocol.Companion.TelemetryData(RxBt, rawData)
                             )
                         }
-                        SPORT_ARDU_TEXT_SENSOR -> {
-                            dataDecoder.decodeData(
-                                Protocol.Companion.TelemetryData(ARDU_TEXT, rawData)
-                            )
-                        }
+                        SPORT_ARDU_TEXT_SENSOR -> textWord(rawData)
                         SPORT_ARDU_ATTITUDE_SENSOR -> {
                             dataDecoder.decodeData(
                                 Protocol.Companion.TelemetryData(ARDU_ATTITUDE, rawData)
@@ -534,6 +532,40 @@ class FrSkySportProtocol : Protocol {
                 }
             }
         }
+    }
+
+    // ArduPilot's status text, a word at a time: four 7-bit characters, the
+    // first in the top byte, and the last word the one with an empty slot,
+    // the severity in the tops of its three low bytes. Each word goes out two
+    // to four times over, and a receiver adds copies of its own, so a word
+    // equal to the one before it is a copy — there is no other telling, and
+    // two like words in a row inside one message lose the second, as they do
+    // on the radio's own screen. Gathered here, where the link is read, so
+    // the screen, the CSV and a replay all have the message whole. No more
+    // than fifty characters of a text ever travel this way: past them, one
+    // message lost its end word and the next ran into it, and only the word
+    // that ran over — the newer message's — is kept.
+    private var lastTextWord: Int? = null
+    private val text = StringBuilder()
+
+    private fun textWord(word: Int) {
+        if (word == lastTextWord) return
+        lastTextWord = word
+        for (shift in intArrayOf(24, 16, 8, 0)) {
+            val c = (word ushr shift) and 0x7F
+            if (c == 0) {
+                val severity = ((word ushr 21) and 4) or ((word ushr 14) and 2) or ((word ushr 7) and 1)
+                if (text.isNotEmpty()) dataDecoder.decodeData(
+                    Protocol.Companion.TelemetryData(
+                        STATUSTEXT, severity, byteArrayOf(severity.toByte()) + text.toString().toByteArray() + 0
+                    )
+                )
+                text.setLength(0)
+                return
+            }
+            text.append(c.toChar())
+        }
+        if (text.length > TEXT_LENGTH) text.delete(0, text.length - 4)
     }
 
     private fun checksumIsValud() : Boolean {

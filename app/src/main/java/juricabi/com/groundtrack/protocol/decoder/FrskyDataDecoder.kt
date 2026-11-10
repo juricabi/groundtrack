@@ -306,6 +306,10 @@ class FrskyDataDecoder(listener: Listener) : DataDecoder(listener) {
                 }
             }
 
+            Protocol.STATUSTEXT -> { //0x5000, gathered into whole messages
+                statusTextOf(data)?.let { (text, severity) -> listener.onStatusText(text, severity) }
+            }
+
             Protocol.DATA_ID_ACC_X_1000 -> {
                 val value = data.data / 1000f
                 //Log.d(TAG, "Decoded acc_x $value")
