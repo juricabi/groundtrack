@@ -314,7 +314,7 @@ def sport_text_words(severity, text):
                 break
             word |= text[at] << ((3 - k) * 8)
             at += 1
-        if end or at == 50:
+        if end:
             words.append(word | ((severity & 4) << 21) | ((severity & 2) << 14)
                          | ((severity & 1) << 7))
             return words

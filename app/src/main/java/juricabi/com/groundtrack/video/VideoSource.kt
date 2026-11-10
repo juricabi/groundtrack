@@ -55,9 +55,9 @@ interface VideoSource {
     fun stop()
 
     /**
-     * Re-lays the current picture into the view — fit or fill, and the
-     * remembered turn. The screen calls this when either button is tapped;
-     * only the source knows the picture's size.
+     * Re-lays the current picture into the view with the remembered turn and
+     * shape. The screen calls this when either button is tapped; only the
+     * source knows the picture's size.
      */
     fun refit() {}
 
@@ -101,10 +101,11 @@ interface VideoSource {
  * cannot be clipped to it. The half is resized with the divider, which is
  * the zoom a fill button would have been.
  *
- * [videoWidth]/[videoHeight] are the picture's sides AS THEY LEAVE the
- * source, after any turn it has applied — so a source turning a 1280×720
- * feed sideways passes 720×1280. The half's size is read from the parent,
- * since the surface is now smaller than the pane and cannot report it.
+ * [videoWidth]/[videoHeight] are the box [pictureBox] makes: the picture
+ * as it is to be seen, turned and shaped — so a source turning a 1280×720
+ * feed sideways passes 720×1280, and a 640×480 one shown 16:9 passes
+ * 853×480. The half's size is read from the parent, since the surface is
+ * now smaller than the pane and cannot report it.
  */
 internal fun SurfaceView.fitPicture(videoWidth: Int, videoHeight: Int) {
     val half = parent as? ViewGroup ?: return

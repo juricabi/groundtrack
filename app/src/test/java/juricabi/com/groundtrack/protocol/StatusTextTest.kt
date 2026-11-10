@@ -49,9 +49,34 @@ class StatusTextTest {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)
         val words = "x".repeat(50)
-        // id 0: the only chunk there is, its fifty characters with no NUL
+        // id 0, its fifty characters with no NUL: whole, once the next
+        // packet shows no second piece follows
         feed(protocol, mav2Frame(STATUSTEXT, text(6, words) + byteArrayOf(0, 0, 0)))
+        feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9)))
         assertEquals(listOf(words to 6), ear.said)
+    }
+
+    @Test
+    fun px4sFirstTextOfABootArrivesWholeThoughUnnumbered() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        // PX4 numbers from 0 at each boot, its first text long or not
+        val long = "Preflight Fail: Accel Sensor 0 missing - check the IMU wiring and power, then reboot"
+        long.chunked(50).forEachIndexed { k, part -> feed(protocol, chunk(3, part, id = 0, seq = k)) }
+        feed(protocol, chunk(6, "Ready for takeoff!", id = 1, seq = 0))
+        assertEquals(listOf(long to 3, "Ready for takeoff!" to 6), ear.said)
+    }
+
+    @Test
+    fun twoUnnumberedFullTextsInARowAreTwo() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        val first = "a".repeat(50)
+        val second = "b".repeat(50)
+        feed(protocol, mav2Frame(STATUSTEXT, text(4, first) + byteArrayOf(0, 0, 0)))
+        feed(protocol, mav2Frame(STATUSTEXT, text(4, second) + byteArrayOf(0, 0, 0)))
+        feed(protocol, mav2Frame(STATUSTEXT, text(6, "Armed")))
+        assertEquals(listOf(first to 4, second to 4, "Armed" to 6), ear.said)
     }
 
     private fun chunk(severity: Int, words: String, id: Int, seq: Int) = chunk(severity, words.toByteArray(), id, seq)
@@ -135,18 +160,6 @@ class StatusTextTest {
         val next = "EKF3 IMU0 MAG0 ground mag anomaly, yaw re-aligned after takeoff"
         next.chunked(50).forEachIndexed { k, part -> feed(protocol, chunk(4, part, id = 1, seq = k)) }
         assertEquals(listOf(first to 4, next to 4), ear.said)
-    }
-
-    @Test
-    fun whatIsStillGatheredGoesOnWhenTheStreamEnds() {
-        val ear = Ear()
-        val protocol = MAVLink2Protocol(ear)
-        // PX4's exactly fifty, and then the log ends
-        feed(protocol, chunk(2, "Failsafe enabled: no datalink, activating Return!!", id = 7, seq = 0))
-        repeat(20) { feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9))) }
-        assertEquals(emptyList<Pair<String, Int>>(), ear.said)
-        protocol.end()
-        assertEquals(listOf("Failsafe enabled: no datalink, activating Return!!" to 2), ear.said)
     }
 
     @Test

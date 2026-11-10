@@ -152,17 +152,19 @@ letterboxed rather than cropped, and the flight overlays keep to the map's
 half. A stream that cannot connect keeps its pane, says why and retries; one
 that stalls rejoins itself.
 
-**Recording** writes to `Movies/Groundtrack/`, named like the flight logs. RTSP
-and raw RTP are saved exactly as they arrive; USB and MJPEG go through the
-phone's hardware H.264 encoder. The files are MPEG transport streams (`.ts`,
-for VLC, mpv or ffmpeg), readable to the last byte, so a crash or a flat
-battery keeps everything up to the last second. Rotations and dropouts
+**Recording** writes to `Movies/Groundtrack/`, named like the flight logs.
+RTSP and raw RTP are saved exactly as they arrive; USB and MJPEG go through
+the phone's hardware H.264 encoder. The files are MPEG transport streams
+(`.ts`, for VLC, mpv or ffmpeg), readable to the last byte, so a crash or a
+flat battery keeps everything up to the last second. Rotations and dropouts
 continue the same file. The picture goes in as the camera sent it, never
-turned, and in the shape it is watched in — said in the stream for players
-to show it so, from the next keyframe after a change. With the sound on, its
-sound goes in too (USB and RTSP, the sources that carry any), as AAC, and
-once a recording has sound it keeps it to the end — silent where the sound
-was off. A recording stops itself when storage runs low.
+turned, and in the shape it is watched in — said in the stream for players to
+show it so, from the next keyframe after a change (players built on ExoPlayer,
+as many gallery apps are, keep the shape a recording began in; choose it
+before recording). With the sound on, its sound goes in too (USB and RTSP, the
+sources that carry any), as AAC, and once a recording has sound it keeps it to
+the end — silent where the sound was off. A recording stops itself when
+storage runs low.
 
 To try `udp://` with no hardware, send a test pattern from a PC on the same
 Wi-Fi, or from Termux on the phone to `127.0.0.1`:

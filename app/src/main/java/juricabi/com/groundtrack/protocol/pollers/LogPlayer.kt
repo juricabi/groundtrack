@@ -268,8 +268,6 @@ class LogPlayer(val originalListener: DataDecoder.Listener) :
                         bytesRead = input.read(bytes)
                     }
                 }
-                // a message the flight was still gathering when the log ended
-                if (!isCancelled) tempProtocol?.end()
                 publishProgress(100)
             }
 

@@ -221,7 +221,7 @@ class StreamRecorder(
     private val append: Boolean,
     private val startedAtUs: Long,
     private val onClosed: (StreamRecorder, endedBy: String?) -> Unit,
-    /** The shape the picture is watched in, asked as each frame arrives; null for its own. */
+    /** The shape the picture is watched in, asked as each keyframe arrives; null for its own. */
     private val shape: () -> Shape? = { null },
     private val clockUs: () -> Long = { SystemClock.elapsedRealtimeNanos() / 1000 },
     private val minFreeBytes: Long = 200L shl 20
@@ -234,7 +234,7 @@ class StreamRecorder(
         val parameterSets: List<ByteArray>, val arrivalUs: Long,
         /** Frames were dropped just before this one; the timeline resumes at a keyframe. */
         val afterGap: Boolean,
-        /** The shape it was watched in, for the SPS it goes in with. */
+        /** A keyframe's shape, which its run's SPS take; null on the frames after it. */
         val shape: Shape?
     ) : Item(data)
 
@@ -263,7 +263,7 @@ class StreamRecorder(
         val afterGap = dropped
         dropped = false
         queuedBytes.addAndGet(annexB.size.toLong())
-        queue.offer(Frame(codec, annexB, streamUs, key, parameterSets, clockUs(), afterGap, shape()))
+        queue.offer(Frame(codec, annexB, streamUs, key, parameterSets, clockUs(), afterGap, if (key) shape() else null))
     }
 
     // past the bound a sound frame is simply lost: the picture's gap is what

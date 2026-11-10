@@ -73,6 +73,8 @@ class MAVLink2Protocol : Protocol {
         private const val TEXT_LENGTH = 50
         // a long message's next chunk comes within these of the link's other packets
         private const val CHUNK_PATIENCE = 50
+        // the key a held id-0 piece goes under: past every id the link can carry
+        private const val UNNUMBERED = 0x10000
         private val GAP = "…".toByteArray()
         private const val MAV_PACKET_TRANSMISSION_HANDSHAKE = 130
         private const val MAV_PACKET_ENCAPSULATED_DATA      = 131
@@ -162,12 +164,20 @@ class MAVLink2Protocol : Protocol {
     // sends on what was gathered; a piece lost on the way stands as "…" in its
     // place; and PX4 ends a text of exactly fifty or a hundred characters with
     // no NUL at all, so one not ended within fifty of the link's other packets
-    // — counted, not timed, so a replay joins it where the flight did — goes on
-    // as it is, and a replay sends on what its log ends with ([end]). A chunk
-    // come again within those fifty packets is a copy and dropped; past them
-    // the id is forgotten, since both firmwares count their ids afresh from
-    // each boot and a link can outlive one. The severity is the first chunk's:
-    // every chunk carries the same.
+    // goes on as it is — counted, not timed, so a replay joins it as the
+    // flight did. Only a reconnect parts them: the new link starts afresh,
+    // while its log goes on in the same file, and there a piece the old link
+    // was holding runs into what follows. A chunk come again within those
+    // fifty packets is a copy and dropped; past them the id is forgotten,
+    // since both firmwares count their ids afresh from each boot and a link
+    // can outlive one. The severity is the first chunk's: every chunk carries
+    // the same.
+    //
+    // Id 0 is a text in one piece — but PX4 numbers its first text of a boot
+    // 0 as well, long or not. So a piece under id 0 with no NUL in it, which
+    // ArduPilot sends for a text of exactly fifty, is held under a key of its
+    // own until the next packet says whether a second piece follows: PX4
+    // sends a text's pieces back to back.
     private var chunkId = 0
     private var nextChunk = 0
     private var chunkSeverity = 0
@@ -181,14 +191,17 @@ class MAVLink2Protocol : Protocol {
         val words = payload.copyOfRange(1, end)
         val id = (payload[TEXT_LENGTH + 1].toInt() and 0xFF) or ((payload[TEXT_LENGTH + 2].toInt() and 0xFF) shl 8)
         val seq = payload[TEXT_LENGTH + 3].toInt() and 0xFF
-        if (id == 0) {
-            // the only chunk there is
+        if (id == 0 && seq == 0 && end <= TEXT_LENGTH) {
+            // the only piece there is; one held unnumbered ends here
+            if (chunkId == UNNUMBERED) forget()
             say(severity, words)
             return
         }
-        if (id != chunkId) {
+        val key = if (id == 0) UNNUMBERED else id
+        // an unnumbered first piece is always a text of its own
+        if (key != chunkId || key == UNNUMBERED && seq == 0) {
             sendChunks()
-            chunkId = id
+            chunkId = key
             chunkSeverity = severity
             nextChunk = 0
         }
@@ -206,7 +219,11 @@ class MAVLink2Protocol : Protocol {
         nextChunk = Int.MAX_VALUE
     }
 
-    override fun end() = sendChunks()
+    /** Sends on what is held and lets its id go. */
+    private fun forget() {
+        sendChunks()
+        chunkId = 0
+    }
 
     /** One whole message, in the form every link's status text takes: severity, words, NUL. */
     private fun say(severity: Int, words: ByteArray) {
@@ -217,10 +234,9 @@ class MAVLink2Protocol : Protocol {
     }
 
     private fun processPacket() {
-        if (chunkId != 0 && ++sinceChunk > CHUNK_PATIENCE) {
-            sendChunks()
-            chunkId = 0
-        }
+        if (chunkId == UNNUMBERED && messageId != MAV_PACKET_STATUSTEXT_ID ||
+            chunkId != 0 && ++sinceChunk > CHUNK_PATIENCE
+        ) forget()
         val byteBuffer = ByteBuffer.wrap(buffer.copyOf(255).map { it.toByte() }.toByteArray())
             .order(ByteOrder.LITTLE_ENDIAN)
         if (messageId == MAV_PACKET_STATUS_ID) {

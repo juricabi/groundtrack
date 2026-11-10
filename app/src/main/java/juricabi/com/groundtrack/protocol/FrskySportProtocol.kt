@@ -541,10 +541,12 @@ class FrSkySportProtocol : Protocol {
     // equal to the one before it is a copy — there is no other telling, and
     // two like words in a row inside one message lose the second, as they do
     // on the radio's own screen. Gathered here, where the link is read, so
-    // the screen and a replay both have the message whole. No more than fifty
-    // characters of a text ever travel this way: past them, one message lost
-    // its end word and the next ran into it. The newer message goes on from
-    // the word that ran over, "…" standing for what came before it.
+    // the screen and a replay both have the message whole — but for one cut
+    // by a reconnect, whose new link starts afresh while its log goes on in
+    // the same file, where the cut piece runs into what follows. No more
+    // than fifty characters of a text ever travel this way: past them, one
+    // message lost its end word and the next ran into it. The newer message
+    // goes on from the word that ran over, "…" standing for what came before.
     private var lastTextWord: Int? = null
     private val text = StringBuilder()
 
