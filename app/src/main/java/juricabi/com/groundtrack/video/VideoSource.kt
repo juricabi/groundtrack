@@ -136,3 +136,14 @@ internal fun SurfaceView.fitPicture(videoWidth: Int, videoHeight: Int) {
  *  source: a quarter-turn swaps them, so the half is fitted to the real box. */
 internal fun turnedSides(videoWidth: Int, videoHeight: Int, rotation: Int): Pair<Int, Int> =
     if (rotation % 180 != 0) videoHeight to videoWidth else videoWidth to videoHeight
+
+/**
+ * The box [fitPicture] lays the picture into: the frame's own sides, or —
+ * given the [shape] the camera really films, width over height — the frame
+ * stretched to that. A 16:9 camera through an analog receiver arrives in
+ * 4:3 frames, squeezed thin, and only its shape said again undoes it; every
+ * source scales its frames to the surface, so the box is the whole of it.
+ * The shape is the camera's, so a quarter-turn swaps it with the sides.
+ */
+internal fun pictureBox(videoWidth: Int, videoHeight: Int, rotation: Int, shape: Float?): Pair<Int, Int> =
+    turnedSides(if (shape == null) videoWidth else Math.round(videoHeight * shape), videoHeight, rotation)

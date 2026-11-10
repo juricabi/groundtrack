@@ -66,6 +66,9 @@ class RtspSource(
     // the picture's extra quarter-turn, asked of the host at fit time — the
     // host owns the setting, the source only wears it
     private val turn: () -> Int,
+    // the shape the picture is shown in, width over height, or null for its
+    // frames' own — asked of the host like the turn
+    private val shape: () -> Float?,
     private val events: VideoSource.Events
 ) : VideoSource {
 
@@ -172,13 +175,13 @@ class RtspSource(
                 val dying = player
                 player = null
                 dying?.release()
-                val (w, h) = turnedSides(videoWidth, videoHeight, rotation)
+                val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape())
                 v.fitPicture(w, h)
                 openPlayer()
                 return
             }
         }
-        val (w, h) = turnedSides(videoWidth, videoHeight, rotation)
+        val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape())
         v.fitPicture(w, h)
     }
 

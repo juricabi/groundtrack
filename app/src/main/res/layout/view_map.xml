@@ -88,12 +88,16 @@
                     tools:text="REC 01:23 · 45 MB"
                     tools:visibility="visible"/>
 
-            <!-- The picture's playback controls, a column on its own
-                 bottom-right — the mirror of the map's button column, so
-                 both halves read the same way. Inside the half, they fold
-                 away with it, and stay with the picture when it is
-                 expanded over the whole screen. -->
+            <!-- The picture's playback controls, bottom-right — the mirror
+                 of the map's button column, so both halves read the same
+                 way. They run along the axis the half has more of, set in
+                 code with the split: a column beside the map, a row over
+                 it, where a column of five stood taller than a short half
+                 and lost its top buttons. Inside the half, they fold away
+                 with it, and stay with the picture when it is expanded over
+                 the whole screen. -->
             <LinearLayout
+                    android:id="@+id/video_controls"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="bottom|end"
@@ -137,6 +141,29 @@
                         android:scaleType="fitCenter"
                         android:src="@drawable/ic_rotate"
                         android:visibility="gone"
+                        tools:visibility="visible"/>
+
+                <!-- The picture's shape, said in words: Auto, 16:9, 4:3 —
+                     shrunk to the circle under a large font. -->
+                <TextView
+                        android:id="@+id/video_shape_button"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_margin="4dp"
+                        android:paddingStart="5dp"
+                        android:paddingEnd="5dp"
+                        android:background="@drawable/bg_video_control"
+                        android:gravity="center"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:textColor="#80FFFFFF"
+                        android:textStyle="bold"
+                        app:autoSizeTextType="uniform"
+                        app:autoSizeMinTextSize="7sp"
+                        app:autoSizeMaxTextSize="12sp"
+                        app:autoSizeStepGranularity="1sp"
+                        android:visibility="gone"
+                        tools:text="16:9"
                         tools:visibility="visible"/>
 
                 <ImageView

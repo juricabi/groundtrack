@@ -221,6 +221,9 @@ class UdpSource(
     // the picture's extra quarter-turn, asked of the host at fit time — the
     // host owns the setting, the source only wears it
     private val turn: () -> Int,
+    // the shape the picture is shown in, width over height, or null for its
+    // frames' own — asked of the host like the turn
+    private val shape: () -> Float?,
     private val events: VideoSource.Events
 ) : VideoSource {
 
@@ -280,7 +283,7 @@ class UdpSource(
         // picture not yet there, which read as wrongly turned. The gap is
         // clean black, the old decoder's stretched frames dropped.
         if (wanted != decoderRotation) rebuildDecoder = true
-        val (w, h) = turnedSides(pictureWidth, pictureHeight, decoderRotation)
+        val (w, h) = pictureBox(pictureWidth, pictureHeight, decoderRotation, shape())
         v.fitPicture(w, h)
     }
 

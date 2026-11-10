@@ -39,6 +39,9 @@ class UsbUvcSource(
     // the picture's extra quarter-turn, asked of the host at fit time — the
     // host owns the setting, the source only wears it
     private val turn: () -> Int,
+    // the shape the picture is shown in, width over height, or null for its
+    // frames' own — asked of the host like the turn
+    private val shape: () -> Float?,
     private val events: VideoSource.Events
 ) : VideoSource {
 
@@ -156,7 +159,7 @@ class UsbUvcSource(
         applyRotation(rotation)
         // the library turns the preview, so the half is fitted to the sides
         // as they land — swapped for a quarter-turn
-        val (w, h) = turnedSides(size.width, size.height, rotation)
+        val (w, h) = pictureBox(size.width, size.height, rotation, shape())
         v.fitPicture(w, h)
     }
 

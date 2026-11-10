@@ -65,12 +65,14 @@ class VideoPane(
     private val videoButton: ImageView = activity.findViewById(R.id.video_button)
     private val videoSoundButton: ImageView = activity.findViewById(R.id.video_sound_button)
     private val videoRotateButton: ImageView = activity.findViewById(R.id.video_rotate_button)
+    private val videoShapeButton: TextView = activity.findViewById(R.id.video_shape_button)
     private val videoRecordButton: ImageView = activity.findViewById(R.id.video_record_button)
     private val videoRecordLabel: TextView = activity.findViewById(R.id.video_record_label)
     private val videoExpandButton: ImageView = activity.findViewById(R.id.video_expand_button)
     private val videoDivider: View = activity.findViewById(R.id.video_divider)
     private val videoView: SurfaceView = activity.findViewById(R.id.video_view)
     private val videoHalf: FrameLayout = activity.findViewById(R.id.video_half)
+    private val videoControls: LinearLayout = activity.findViewById(R.id.video_controls)
     private val videoWaiting: TextViewOutline = activity.findViewById(R.id.video_waiting)
     private val videoBlank: View = activity.findViewById(R.id.video_blank)
     private val flightPane: LinearLayout = activity.findViewById(R.id.flight_pane)
@@ -96,6 +98,7 @@ class VideoPane(
             }
             false
         }
+        videoShapeButton.setOnClickListener { reshape() }
         videoDivider.setOnTouchListener { _, event -> dragSplit(event) }
         videoRecordButton.setOnClickListener { toggleRecording() }
         videoExpandButton.setOnClickListener { setExpanded(!expanded) }
@@ -374,8 +377,9 @@ class VideoPane(
         // rotation crosses the seam as a question the source asks back —
         // the setting stays the host's, and video/ stops reading manager/
         val turn = { preferenceManager.getVideoRotation() }
+        val shape = { shapeRatio(preferenceManager.getVideoShape()) }
         return when (preferenceManager.getVideoSource()) {
-            "usb" -> UsbUvcSource(activity, turn, events)
+            "usb" -> UsbUvcSource(activity, turn, shape, events)
             "network" -> {
                 // trimmed, because a keyboard's autocomplete space made a
                 // right address fail with a toast insisting it was wrong
@@ -396,11 +400,11 @@ class VideoPane(
                     url.startsWith("rtsp://", ignoreCase = true) ->
                         return RtspSource(
                             activity, url, preferenceManager.getRtspUdp(),
-                            { binder.networkTo(streamHost)?.socketFactory }, turn, events
+                            { binder.networkTo(streamHost)?.socketFactory }, turn, shape, events
                         )
                     url.startsWith("http://", ignoreCase = true) ||
                         url.startsWith("https://", ignoreCase = true) ->
-                        return MjpegSource(url, binder.networkTo(streamHost), turn, events)
+                        return MjpegSource(url, binder.networkTo(streamHost), turn, shape, events)
                     url.startsWith("udp://", ignoreCase = true) -> {
                         // a pushed stream has no address to dial, only the
                         // port here to listen on — udp://5600 and
@@ -408,7 +412,7 @@ class VideoPane(
                         val port = url.substring(6).trim('/')
                             .substringAfterLast(':').toIntOrNull()
                         if (port != null && port in 1..65535)
-                            return UdpSource(port, turn, events)
+                            return UdpSource(port, turn, shape, events)
                         "udp:// needs the port the stream is pushed to, like udp://5600"
                     }
                     else -> "The stream address must start rtsp:// (RTSP), " +
@@ -438,6 +442,9 @@ class VideoPane(
             activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         flightPane.orientation =
             if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        // the half is tall beside the map and wide above it
+        videoControls.orientation =
+            if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         val match = LinearLayout.LayoutParams.MATCH_PARENT
         // coerced here too, so a split saved under looser old bounds obeys
         val share = preferenceManager.getVideoSplit(landscape).coerceIn(0.3f, 0.5f)
@@ -538,6 +545,7 @@ class VideoPane(
             applyExpanded()
             videoSoundButton.visibility = View.GONE
             videoRotateButton.visibility = View.GONE
+            videoShapeButton.visibility = View.GONE
             videoRecordButton.visibility = View.GONE
             DebugLog.note("Video", "camera permission asked")
             askPermission(android.Manifest.permission.CAMERA, cameraPermissionCode)
@@ -570,6 +578,8 @@ class VideoPane(
         // wears the same angle so it shows which turn is on
         videoRotateButton.visibility = View.VISIBLE
         videoRotateButton.rotation = preferenceManager.getVideoRotation().toFloat()
+        videoShapeButton.visibility = View.VISIBLE
+        showShape()
         videoRecordButton.visibility = View.VISIBLE
         showRecording()
         // a recording running when the source was rebuilt — a retry, a
@@ -593,6 +603,29 @@ class VideoPane(
         // source, which takes it up in place: the decoder rebuilds with it,
         // no reconnect, a keyframe's worth of black at most.
         videoSource?.refit()
+    }
+
+    /**
+     * The picture's shape, a tap at a time: its frames' own, 16:9, 4:3, and
+     * round again — for a camera that films one shape and reaches the phone
+     * in another (see pictureBox). Remembered like the turn, since it belongs
+     * to the camera, and taken up in place: only the surface's box changes.
+     * A recording keeps the frames as they came.
+     */
+    private fun reshape() {
+        val next = SHAPES[(SHAPES.indexOf(preferenceManager.getVideoShape()) + 1) % SHAPES.size]
+        preferenceManager.setVideoShape(next)
+        showShape()
+        videoSource?.refit()
+    }
+
+    /** The button says the shape on, lit while one is chosen over the frames' own. */
+    private fun showShape() {
+        val shape = preferenceManager.getVideoShape()
+        val auto = shapeRatio(shape) == null
+        videoShapeButton.text = if (auto) "Auto" else shape
+        videoShapeButton.contentDescription = "Picture shape: " + (if (auto) "as it comes" else shape)
+        videoShapeButton.setTextColor(if (auto) 0x80FFFFFF.toInt() else 0xFFFFFFFF.toInt())
     }
 
     private fun toggleSound() {
@@ -886,5 +919,16 @@ class VideoPane(
             videoSoundButton.imageAlpha = 128
         }
         return granted
+    }
+
+    companion object {
+        private val SHAPES = listOf("auto", "16:9", "4:3")
+
+        /** Width over height for a chosen shape; null for "auto", the frames' own. */
+        internal fun shapeRatio(shape: String): Float? = when (shape) {
+            "16:9" -> 16f / 9f
+            "4:3" -> 4f / 3f
+            else -> null
+        }
     }
 }

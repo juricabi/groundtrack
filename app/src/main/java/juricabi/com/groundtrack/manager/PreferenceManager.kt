@@ -267,6 +267,15 @@ class PreferenceManager(context: Context) {
         sharedPreferences.edit().putInt("video_rotation", degrees).apply()
     }
 
+    /** The shape the picture is shown in: "auto" for its frames' own, "16:9" or "4:3". */
+    fun getVideoShape(): String {
+        return sharedPreferences.getString("video_shape", "auto") ?: "auto"
+    }
+
+    fun setVideoShape(shape: String) {
+        sharedPreferences.edit().putString("video_shape", shape).apply()
+    }
+
     fun isClockEnabled(): Boolean {
         return sharedPreferences.getBoolean("show_clock", true)
     }
