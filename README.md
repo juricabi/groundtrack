@@ -45,8 +45,9 @@ before opening it.
   you, as a plus code, a route in your maps app or a message to share.
 - Flight plans from CSV (one `latitude,longitude` per line); nearby aircraft
   from FlightRadar24 with spoken warnings ([opt-in](#nearby-aircraft)).
-- **Messages**: everything the autopilot says (MAVLink status text, and the
-  same over ArduPilot passthrough on CRSF) — the latest above the flight mode,
+- **Messages**: everything the autopilot says (MAVLink status text, PX4's
+  long ones joined whole, and the same over ArduPilot passthrough on CRSF or
+  FrSky S.Port) — the latest above the flight mode,
   and the whole flight's behind the small *messages* tab beside it: newest
   first, timed, coloured and named by severity, repeats folded. In a replay
   it is the flight's up to where the replay stands, and a tap on one goes
@@ -75,8 +76,9 @@ before opening it.
 | CRSF / Crossfire / Tracer / ExpressLRS | GPS (with Betaflight's fix and precision over Crossfire and Tracer), attitude, flight mode, battery (millivolts from ExpressLRS 4.1 receivers), temperature, motor RPM, RC and link statistics |
 | Ghost (GHST) | GPS, battery and Ghost link statistics/profile |
 | LTM | GPS, attitude, status and battery |
-| MAVLink 1 and 2 | GPS, global position, attitude, battery, radio, flight mode and status text |
+| MAVLink 1 and 2 | GPS, global position, attitude, battery, radio, flight mode and status text, a long one joined from the pieces MAVLink 2 sends it in |
 | ArduPilot passthrough over CRSF | flight mode and armed state, GPS status, battery, home distance and direction, velocity, attitude, throttle and status texts (`RC_OPTIONS += 256`, receiver serial on protocol 23) |
+| ArduPilot passthrough over S.Port | the same, with the position from FrSky's own GPS sensor and the status texts read four characters a word (`SERIALn_PROTOCOL = 10`) |
 | MAVLink High Latency | HIGH_LATENCY2 — position, altitude, heading, speeds, throttle, battery, mode and armed state, one 42-byte message per five seconds (`SERIALn_PROTOCOL = 43`) |
 
 Detection latches on the first valid match; the High Latency preset pins
@@ -138,9 +140,11 @@ portrait. The address says what the stream is:
   in webcam mode, including UVC 1.5 ones such as the DJI Osmo Action that
   stock Android UVC libraries refuse.
 
-The picture carries its own **record**, **sound**, **quarter-turn**
-(remembered) and **expand** buttons; expand gives it the whole screen until
-Back. The seam drags, the picture is letterboxed rather than cropped, and the
+The picture carries its own **record**, **sound**, **quarter-turn**,
+**shape** and **expand** buttons. The shape steps through *Auto* (the frames'
+own), **16:9** and **4:3**: a 16:9 camera behind an analog receiver arrives in
+4:3 frames, squeezed thin, and 16:9 stretches it back. The turn and the shape
+are remembered; expand gives the picture the whole screen until Back. The seam drags, the picture is letterboxed rather than cropped, and the
 flight overlays keep to the map's half. A stream that cannot connect keeps its
 pane, says why and retries; one that stalls rejoins itself.
 
@@ -150,7 +154,7 @@ phone's hardware H.264 encoder. The files are MPEG transport streams (`.ts`,
 for VLC, mpv or ffmpeg), readable to the last byte, so a crash or a flat
 battery keeps everything up to the last second. Rotations and dropouts
 continue the same file. The picture goes in as the camera sent it, never
-turned; with the sound on, its sound goes in too (USB and RTSP, the sources
+turned or reshaped; with the sound on, its sound goes in too (USB and RTSP, the sources
 that carry any), as AAC, and once a recording has sound it keeps it to the
 end — silent where the sound was off. A recording stops itself when storage
 runs low.
@@ -291,8 +295,13 @@ Connect with **Network → TBS Crossfire / Tracer (UDP)** on port 8888.
 heights, `--passthrough` weaves in ArduPilot passthrough, `--rx-vbat` and
 `--esc-telemetry` add ExpressLRS millivolts and iNav-style RPM and ESC
 temperatures, `--gps-extended` adds Betaflight's fix, accuracy and HDOP, and `--protocol mavlink-hl --wait-enable` plays an ArduPilot high-latency port
-(use the **MAVLink High Latency (UDP)** preset with the PC's address).
-`--help` lists the rest.
+(use the **MAVLink High Latency (UDP)** preset with the PC's address), with
+`--texts` adding status text, a long one in MAVLink 2's pieces as PX4 sends
+it. `--protocol sport` sends FrSky S.Port as ArduPilot answers a FrSky
+receiver — its GPS sensor, the passthrough words and the status text — over
+the same UDP connection, which tells it from CRSF by itself. `--passthrough`
+and `--protocol sport` both send a burst of messages every 20 seconds, for
+the message history. `--help` lists the rest.
 
 ### Code map
 
