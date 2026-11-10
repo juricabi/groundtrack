@@ -221,9 +221,9 @@ class UdpSource(
     // the picture's extra quarter-turn, asked of the host at fit time — the
     // host owns the setting, the source only wears it
     private val turn: () -> Int,
-    // the shape the picture is shown in, width over height, or null for its
-    // frames' own — asked of the host like the turn
-    private val shape: () -> Float?,
+    // the shape the picture is shown in, or null for the stream's own —
+    // asked of the host like the turn
+    private val shape: () -> Shape?,
     private val events: VideoSource.Events
 ) : VideoSource {
 
@@ -238,6 +238,8 @@ class UdpSource(
     @Volatile private var view: SurfaceView? = null
     @Volatile private var pictureWidth = 0
     @Volatile private var pictureHeight = 0
+    // a pixel's width to its height, as the SPS the decoder was built on says
+    @Volatile private var pixelRatio = 1f
 
     // whole access units, receiver to decoder, each marked whether it
     // carries a keyframe; a burst beyond the decoder's pace drops the
@@ -283,7 +285,7 @@ class UdpSource(
         // picture not yet there, which read as wrongly turned. The gap is
         // clean black, the old decoder's stretched frames dropped.
         if (wanted != decoderRotation) rebuildDecoder = true
-        val (w, h) = pictureBox(pictureWidth, pictureHeight, decoderRotation, shape())
+        val (w, h) = pictureBox(pictureWidth, pictureHeight, decoderRotation, shape(), pixelRatio)
         v.fitPicture(w, h)
     }
 
@@ -516,6 +518,7 @@ class UdpSource(
 
     private fun decode(codec: RtpCodec, parameterSets: List<ByteArray>) {
         val startCode = byteArrayOf(0, 0, 0, 1)
+        parameterSets.firstOrNull { nalType(codec, it) == spsType(codec) }?.let { pixelRatio = pixelRatioOf(codec, it) }
         val decoder = try {
             MediaCodec.createDecoderByType(codec.mime)
         } catch (e: Exception) {

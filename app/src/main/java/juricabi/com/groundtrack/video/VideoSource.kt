@@ -138,12 +138,17 @@ internal fun turnedSides(videoWidth: Int, videoHeight: Int, rotation: Int): Pair
     if (rotation % 180 != 0) videoHeight to videoWidth else videoWidth to videoHeight
 
 /**
- * The box [fitPicture] lays the picture into: the frame's own sides, or —
- * given the [shape] the camera really films, width over height — the frame
- * stretched to that. A 16:9 camera through an analog receiver arrives in
- * 4:3 frames, squeezed thin, and only its shape said again undoes it; every
- * source scales its frames to the surface, so the box is the whole of it.
- * The shape is the camera's, so a quarter-turn swaps it with the sides.
+ * The box [fitPicture] lays the picture into: the frame in its own shape —
+ * its sides, its pixels as wide as the stream says ([pixelRatio]) — or the
+ * frame stretched to the [shape] the camera really films. Either way it is
+ * the shape a recording of it plays back in. Every source scales its frames
+ * to the surface, so the box is the whole of it. The shape is the camera's,
+ * so a quarter-turn swaps it with the sides.
  */
-internal fun pictureBox(videoWidth: Int, videoHeight: Int, rotation: Int, shape: Float?): Pair<Int, Int> =
-    turnedSides(if (shape == null) videoWidth else Math.round(videoHeight * shape), videoHeight, rotation)
+internal fun pictureBox(
+    videoWidth: Int, videoHeight: Int, rotation: Int, shape: Shape?, pixelRatio: Float = 1f
+): Pair<Int, Int> = turnedSides(
+    if (shape == null) Math.round(videoWidth * pixelRatio)
+    else Math.round(videoHeight * shape.width / shape.height.toFloat()),
+    videoHeight, rotation
+)

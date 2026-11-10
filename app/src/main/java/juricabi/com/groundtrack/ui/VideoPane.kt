@@ -29,6 +29,7 @@ import juricabi.com.groundtrack.utils.DebugLog
 import juricabi.com.groundtrack.utils.NetworkBinder
 import juricabi.com.groundtrack.video.MjpegSource
 import juricabi.com.groundtrack.video.RtspSource
+import juricabi.com.groundtrack.video.Shape
 import juricabi.com.groundtrack.video.StreamRecorder
 import juricabi.com.groundtrack.video.UdpSource
 import juricabi.com.groundtrack.video.UsbUvcSource
@@ -377,7 +378,7 @@ class VideoPane(
         // rotation crosses the seam as a question the source asks back —
         // the setting stays the host's, and video/ stops reading manager/
         val turn = { preferenceManager.getVideoRotation() }
-        val shape = { shapeRatio(preferenceManager.getVideoShape()) }
+        val shape = { shapeOf(preferenceManager.getVideoShape()) }
         return when (preferenceManager.getVideoSource()) {
             "usb" -> UsbUvcSource(activity, turn, shape, events)
             "network" -> {
@@ -606,11 +607,11 @@ class VideoPane(
     }
 
     /**
-     * The picture's shape, a tap at a time: its frames' own, 16:9, 4:3, and
-     * round again — for a camera that films one shape and reaches the phone
-     * in another (see pictureBox). Remembered like the turn, since it belongs
-     * to the camera, and taken up in place: only the surface's box changes.
-     * A recording keeps the frames as they came.
+     * The picture's shape, a tap at a time: Auto, the stream's own, then
+     * 16:9, 4:3, and round again — for a camera that films one shape and reaches the phone
+     * in another (see Shape). Remembered like the turn, since it belongs to
+     * the camera, and taken up in place: on screen only the surface's box
+     * changes, and a recording takes it from its next keyframe.
      */
     private fun reshape() {
         val next = SHAPES[(SHAPES.indexOf(preferenceManager.getVideoShape()) + 1) % SHAPES.size]
@@ -619,12 +620,13 @@ class VideoPane(
         videoSource?.refit()
     }
 
-    /** The button says the shape on, lit while one is chosen over the frames' own. */
+    /** The button says the shape on, lit while one is chosen over Auto, the stream's own. */
     private fun showShape() {
         val shape = preferenceManager.getVideoShape()
-        val auto = shapeRatio(shape) == null
-        videoShapeButton.text = if (auto) "Auto" else shape
-        videoShapeButton.contentDescription = "Picture shape: " + (if (auto) "as it comes" else shape)
+        val auto = shapeOf(shape) == null
+        val label = if (auto) "Auto" else shape
+        videoShapeButton.text = label
+        videoShapeButton.contentDescription = "Picture shape: $label"
         videoShapeButton.setTextColor(if (auto) 0x80FFFFFF.toInt() else 0xFFFFFFFF.toInt())
     }
 
@@ -772,7 +774,9 @@ class VideoPane(
 
     private fun openRecorder(append: Boolean) {
         val file = recording ?: return
-        recorder = StreamRecorder(file, append, recordingSince * 1000, onClosed = { closed, endedBy ->
+        recorder = StreamRecorder(file, append, recordingSince * 1000, shape = {
+            shapeOf(preferenceManager.getVideoShape())
+        }, onClosed = { closed, endedBy ->
             // into the gallery, every time it closes — a rotation included, so
             // a recording the app never gets to finish is still found there
             if (closed.file.exists()) MediaScannerConnection.scanFile(
@@ -924,10 +928,10 @@ class VideoPane(
     companion object {
         private val SHAPES = listOf("auto", "16:9", "4:3")
 
-        /** Width over height for a chosen shape; null for "auto", the frames' own. */
-        internal fun shapeRatio(shape: String): Float? = when (shape) {
-            "16:9" -> 16f / 9f
-            "4:3" -> 4f / 3f
+        /** The shape a name stands for; null for "auto", the stream's own. */
+        internal fun shapeOf(name: String): Shape? = when (name) {
+            "16:9" -> Shape(16, 9)
+            "4:3" -> Shape(4, 3)
             else -> null
         }
     }

@@ -49,7 +49,9 @@ issues and reviews use these terms as written here.
   as an MPEG transport stream; not to be confused with the flight's own
   recording, the `.tlm` log. Sources that arrive compressed (RTSP, UDP/RTP)
   are copied as they came; the others (USB, MJPEG) go through the hardware
-  encoder, their times smoothed by a `FrameClock`. Never turned. The sound,
+  encoder, their times smoothed by a `FrameClock`. Never turned; the
+  picture's shape goes into every SPS as its sample aspect ratio (`Shape`,
+  `video/Shape.kt`), the pixels untouched. The sound,
   while it is on, goes in as AAC through `SoundEncoder` (`video/SoundEncoder.kt`)
   — PCM either way: USB's off the receiver's audio input, RTSP's as the player
   hands it to the speaker. The recorder writes on a thread of its own;

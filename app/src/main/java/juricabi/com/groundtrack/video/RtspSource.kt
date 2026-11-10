@@ -66,9 +66,9 @@ class RtspSource(
     // the picture's extra quarter-turn, asked of the host at fit time — the
     // host owns the setting, the source only wears it
     private val turn: () -> Int,
-    // the shape the picture is shown in, width over height, or null for its
-    // frames' own — asked of the host like the turn
-    private val shape: () -> Float?,
+    // the shape the picture is shown in, or null for the stream's own —
+    // asked of the host like the turn
+    private val shape: () -> Shape?,
     private val events: VideoSource.Events
 ) : VideoSource {
 
@@ -144,6 +144,8 @@ class RtspSource(
     // the picture ran on over the map
     private var videoWidth = 0
     private var videoHeight = 0
+    // a pixel's width to its height, as the stream's SPS says it
+    private var pixelRatio = 1f
 
     // The turn the codec is configured for; a SurfaceView will not turn at
     // the view, and the player's decoder is walled off inside ExoPlayer, so
@@ -175,13 +177,13 @@ class RtspSource(
                 val dying = player
                 player = null
                 dying?.release()
-                val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape())
+                val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape(), pixelRatio)
                 v.fitPicture(w, h)
                 openPlayer()
                 return
             }
         }
-        val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape())
+        val (w, h) = pictureBox(videoWidth, videoHeight, rotation, shape(), pixelRatio)
         v.fitPicture(w, h)
     }
 
@@ -393,6 +395,7 @@ class RtspSource(
                         ) {
                             videoWidth = f.width
                             videoHeight = f.height
+                            pixelRatio = f.pixelWidthHeightRatio
                             view?.let { it.post { refit() } }
                         }
                     }

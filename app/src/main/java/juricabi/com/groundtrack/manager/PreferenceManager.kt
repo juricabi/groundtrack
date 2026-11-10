@@ -267,7 +267,7 @@ class PreferenceManager(context: Context) {
         sharedPreferences.edit().putInt("video_rotation", degrees).apply()
     }
 
-    /** The shape the picture is shown in: "auto" for its frames' own, "16:9" or "4:3". */
+    /** The shape the picture is shown in: "auto" for the stream's own, "16:9" or "4:3". */
     fun getVideoShape(): String {
         return sharedPreferences.getString("video_shape", "auto") ?: "auto"
     }

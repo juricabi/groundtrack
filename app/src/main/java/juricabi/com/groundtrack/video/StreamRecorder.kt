@@ -221,6 +221,8 @@ class StreamRecorder(
     private val append: Boolean,
     private val startedAtUs: Long,
     private val onClosed: (StreamRecorder, endedBy: String?) -> Unit,
+    /** The shape the picture is watched in, asked as each frame arrives; null for its own. */
+    private val shape: () -> Shape? = { null },
     private val clockUs: () -> Long = { SystemClock.elapsedRealtimeNanos() / 1000 },
     private val minFreeBytes: Long = 200L shl 20
 ) : RecordSink {
@@ -231,7 +233,9 @@ class StreamRecorder(
         val codec: RtpCodec, data: ByteArray, val streamUs: Long, val key: Boolean,
         val parameterSets: List<ByteArray>, val arrivalUs: Long,
         /** Frames were dropped just before this one; the timeline resumes at a keyframe. */
-        val afterGap: Boolean
+        val afterGap: Boolean,
+        /** The shape it was watched in, for the SPS it goes in with. */
+        val shape: Shape?
     ) : Item(data)
 
     private class Sound(data: ByteArray, val streamUs: Long) : Item(data)
@@ -259,7 +263,7 @@ class StreamRecorder(
         val afterGap = dropped
         dropped = false
         queuedBytes.addAndGet(annexB.size.toLong())
-        queue.offer(Frame(codec, annexB, streamUs, key, parameterSets, clockUs(), afterGap))
+        queue.offer(Frame(codec, annexB, streamUs, key, parameterSets, clockUs(), afterGap, shape()))
     }
 
     // past the bound a sound frame is simply lost: the picture's gap is what
@@ -312,6 +316,14 @@ class StreamRecorder(
                     // a file appended to that has sound keeps it, in its form
                     tail?.soundHeader?.let { declare(configOf(it), tail.soundEndUs) }
                     var mixed = false
+                    // said once: the encoder of some phone writes an SPS
+                    // past what the shape can read, and the file keeps the
+                    // stream's own shape — the log is where that shows
+                    var keptOwnShape = false
+                    val unread = {
+                        if (!keptOwnShape) DebugLog.note("Video", "record keeps the stream's own shape: its SPS could not be read through")
+                        keptOwnShape = true
+                    }
                     fun take(item: Item) {
                         when (item) {
                             is Frame -> {
@@ -320,10 +332,13 @@ class StreamRecorder(
                                     DebugLog.note("Video", "record fell behind, frames dropped")
                                 }
                                 val t = clock.place(item.streamUs, item.arrivalUs, item.key) ?: return
-                                muxer.frame(
-                                    item.codec, item.data, t * 9 / 100, item.key,
-                                    item.parameterSets, clock.tookDiscontinuity()
-                                )
+                                // the shape it was watched in goes in with its
+                                // SPS, in the frame or beside a keyframe
+                                val s = item.shape
+                                val data = if (s == null) item.data else shaped(item.codec, item.data, s, unread)
+                                val sets = if (s == null || !item.key) item.parameterSets
+                                    else item.parameterSets.map { shapedSps(item.codec, it, s, unread) }
+                                muxer.frame(item.codec, data, t * 9 / 100, item.key, sets, clock.tookDiscontinuity())
                             }
                             is Sound -> {
                                 val form = configOf(item.data)

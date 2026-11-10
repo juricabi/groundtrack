@@ -211,11 +211,14 @@ class StreamRecorderTest {
 
     @Volatile private var now = 0L
 
-    private fun record(file: File, append: Boolean, minFree: Long = 0, frames: StreamRecorder.() -> Unit): String? {
+    private fun record(
+        file: File, append: Boolean, minFree: Long = 0, shape: () -> Shape? = { null },
+        frames: StreamRecorder.() -> Unit
+    ): String? {
         val done = CountDownLatch(1)
         var ended: String? = null
         val recorder = StreamRecorder(file, append, 0, { _, why -> ended = why; done.countDown() },
-            clockUs = { now }, minFreeBytes = minFree)
+            shape = shape, clockUs = { now }, minFreeBytes = minFree)
         recorder.frames()
         recorder.close()
         assertTrue("closed", done.await(5, TimeUnit.SECONDS))
@@ -438,6 +441,58 @@ class StreamRecorderTest {
         val packets = packets(file.readBytes())
         assertTrue(packets.none { it.pid == TsMuxer.SOUND_PID })
         assertEquals(listOf(0x1B to TsMuxer.VIDEO_PID), streams(packets.first { it.pid == TsMuxer.PMT_PID }))
+    }
+
+    // what a 640x480 receiver's frames come with: x264's baseline SPS
+    private val receiverSps = "6742c01ed900a03db011000003000100000300320f162e48"
+        .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+    /** The display shape every SPS in the file's picture says, in order. */
+    private fun shapesIn(file: File): List<Float> = pes(packets(file.readBytes())).flatMap { unit ->
+        val units = nalUnits(RtpCodec.H264, unit)
+        units.withIndex().filter { it.value.second == 7 }.map { (k, u) ->
+            val end = units.getOrNull(k + 1)?.first ?: unit.size
+            val nal = unit.copyOfRange(u.first, end).dropWhile { it.toInt() != 1 }.drop(1).toByteArray()
+            val sps = androidx.media3.container.NalUnitUtil.parseSpsNalUnit(nal, 0, nal.size)
+            sps.width * sps.pixelWidthHeightRatio / sps.height
+        }
+    }
+
+    @Test
+    fun theShapeOnScreenGoesIntoEverySpsFromTheNextKeyframe() {
+        val file = File(folder.root, "shaped.ts")
+        var shape: Shape? = Shape(16, 9)
+        record(file, append = false, shape = { shape }) {
+            for (i in 0 until 90) {
+                now = i * 33_333L
+                val key = i % 30 == 0
+                // the encoder's way, the SPS beside the frames, and the
+                // stream's own, in the keyframe itself
+                val inline = if (key && i == 30) byteArrayOf(0, 0, 0, 1) + receiverSps else ByteArray(0)
+                frame(
+                    RtpCodec.H264, inline + byteArrayOf(0, 0, 0, 1, if (key) 0x65 else 0x41) + ByteArray(700),
+                    i * 33_333L, key, listOf(receiverSps, byteArrayOf(0x68, 3))
+                )
+                // turned to 4:3 between the second keyframe and the third
+                if (i == 50) shape = Shape(4, 3)
+            }
+        }
+        val said = shapesIn(file)
+        assertEquals(3, said.size)
+        assertEquals(16 / 9f, said[0], 0.002f)
+        assertEquals(16 / 9f, said[1], 0.002f)
+        assertEquals(4 / 3f, said[2], 0.002f)
+    }
+
+    @Test
+    fun withNoShapeChosenTheSpsGoesInAsItCame() {
+        val file = File(folder.root, "own.ts")
+        record(file, append = false) {
+            now = 0
+            frame(RtpCodec.H264, byteArrayOf(0, 0, 0, 1, 0x65) + ByteArray(700), 0, true, listOf(receiverSps))
+        }
+        val video = pes(packets(file.readBytes())).first()
+        assertTrue(video.toList().windowed(receiverSps.size).any { it == receiverSps.toList() })
     }
 
     @Test

@@ -245,7 +245,7 @@ internal class TsMuxer(
 }
 
 private fun audType(codec: RtpCodec) = if (codec == RtpCodec.H264) 9 else 35
-private fun spsType(codec: RtpCodec) = if (codec == RtpCodec.H264) 7 else 33
+internal fun spsType(codec: RtpCodec) = if (codec == RtpCodec.H264) 7 else 33
 
 private fun aud(codec: RtpCodec) = when (codec) {
     RtpCodec.H264 -> byteArrayOf(0, 0, 0, 1, 0x09, 0xF0.toByte())
@@ -257,7 +257,7 @@ internal fun nalTypes(codec: RtpCodec, annexB: ByteArray): List<Int> =
     nalUnits(codec, annexB).map { it.second }
 
 /** Each NAL unit of an Annex B run: where its start code begins, and its type. */
-private fun nalUnits(codec: RtpCodec, annexB: ByteArray): List<Pair<Int, Int>> {
+internal fun nalUnits(codec: RtpCodec, annexB: ByteArray): List<Pair<Int, Int>> {
     val units = ArrayList<Pair<Int, Int>>(4)
     var i = 0
     while (i + 3 < annexB.size) {

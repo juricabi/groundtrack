@@ -141,12 +141,16 @@ portrait. The address says what the stream is:
   stock Android UVC libraries refuse.
 
 The picture carries its own **record**, **sound**, **quarter-turn**,
-**shape** and **expand** buttons. The shape steps through *Auto* (the frames'
-own), **16:9** and **4:3**: a 16:9 camera behind an analog receiver arrives in
-4:3 frames, squeezed thin, and 16:9 stretches it back. The turn and the shape
-are remembered; expand gives the picture the whole screen until Back. The seam drags, the picture is letterboxed rather than cropped, and the
-flight overlays keep to the map's half. A stream that cannot connect keeps its
-pane, says why and retries; one that stalls rejoins itself.
+**shape** and **expand** buttons. The shape steps through **Auto** (the
+stream's own), **16:9** and **4:3**: a 16:9 camera behind an analog receiver
+arrives in 4:3 frames, squeezed thin, and 16:9 stretches it back; 4:3 shows
+a receiver's 720×480 as the 4:3 picture it is. It stretches and never
+crops, so a picture already letterboxed by its camera, black bars inside the
+frame, is right on Auto. The turn and the shape are remembered; expand gives
+the picture the whole screen until Back. The seam drags, the picture is
+letterboxed rather than cropped, and the flight overlays keep to the map's
+half. A stream that cannot connect keeps its pane, says why and retries; one
+that stalls rejoins itself.
 
 **Recording** writes to `Movies/Groundtrack/`, named like the flight logs. RTSP
 and raw RTP are saved exactly as they arrive; USB and MJPEG go through the
@@ -154,10 +158,11 @@ phone's hardware H.264 encoder. The files are MPEG transport streams (`.ts`,
 for VLC, mpv or ffmpeg), readable to the last byte, so a crash or a flat
 battery keeps everything up to the last second. Rotations and dropouts
 continue the same file. The picture goes in as the camera sent it, never
-turned or reshaped; with the sound on, its sound goes in too (USB and RTSP, the sources
-that carry any), as AAC, and once a recording has sound it keeps it to the
-end — silent where the sound was off. A recording stops itself when storage
-runs low.
+turned, and in the shape it is watched in — said in the stream for players
+to show it so, from the next keyframe after a change. With the sound on, its
+sound goes in too (USB and RTSP, the sources that carry any), as AAC, and
+once a recording has sound it keeps it to the end — silent where the sound
+was off. A recording stops itself when storage runs low.
 
 To try `udp://` with no hardware, send a test pattern from a PC on the same
 Wi-Fi, or from Termux on the phone to `127.0.0.1`:
