@@ -89,59 +89,33 @@
                     tools:visibility="visible"/>
 
             <!-- The picture's playback controls, bottom-right — the mirror
-                 of the map's button column, so both halves read the same
-                 way. They run along the axis the half has more of, set in
-                 code with the split: a column beside the map, a row over
-                 it, where a column of five stood taller than a short half
-                 and lost its top buttons. Inside the half, they fold away
-                 with it, and stay with the picture when it is expanded over
-                 the whole screen. -->
-            <LinearLayout
-                    android:id="@+id/video_controls"
+                 of the map's button column, and wrapping as it does: a half
+                 too short for all five gets a second column beside the
+                 first, rather than losing its top buttons off the picture.
+                 Listed bottom-up, expand nearest the corner. Inside the
+                 half, they fold away with it, and stay with the picture
+                 when it is expanded over the whole screen. -->
+            <com.google.android.flexbox.FlexboxLayout
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|end"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="end"
                     android:layout_margin="4dp"
-                    android:orientation="vertical">
+                    app:alignContent="flex_start"
+                    app:alignItems="flex_start"
+                    app:justifyContent="flex_start"
+                    app:flexDirection="column_reverse"
+                    app:flexWrap="wrap_reverse">
 
                 <ImageView
-                        android:id="@+id/video_record_button"
+                        android:id="@+id/video_expand_button"
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:layout_margin="4dp"
                         android:padding="8dp"
                         android:background="@drawable/bg_video_control"
-                        android:contentDescription="Record the picture"
+                        android:contentDescription="Expand the picture"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_record"
-                        android:visibility="gone"
-                        tools:visibility="visible"/>
-
-                <ImageView
-                        android:id="@+id/video_sound_button"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:layout_margin="4dp"
-                        android:padding="8dp"
-                        android:background="@drawable/bg_video_control"
-                        android:contentDescription="Stream sound"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_sound"
-                        android:visibility="gone"
-                        tools:visibility="visible"/>
-
-                <ImageView
-                        android:id="@+id/video_rotate_button"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:layout_margin="4dp"
-                        android:padding="8dp"
-                        android:background="@drawable/bg_video_control"
-                        android:contentDescription="Turn the picture"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_rotate"
-                        android:visibility="gone"
-                        tools:visibility="visible"/>
+                        android:src="@drawable/ic_expand"/>
 
                 <!-- The picture's shape, said in words: Auto, 16:9, 4:3 —
                      shrunk to the circle under a large font. -->
@@ -167,17 +141,45 @@
                         tools:visibility="visible"/>
 
                 <ImageView
-                        android:id="@+id/video_expand_button"
+                        android:id="@+id/video_rotate_button"
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:layout_margin="4dp"
                         android:padding="8dp"
                         android:background="@drawable/bg_video_control"
-                        android:contentDescription="Expand the picture"
+                        android:contentDescription="Turn the picture"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_expand"/>
+                        android:src="@drawable/ic_rotate"
+                        android:visibility="gone"
+                        tools:visibility="visible"/>
 
-            </LinearLayout>
+                <ImageView
+                        android:id="@+id/video_sound_button"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_margin="4dp"
+                        android:padding="8dp"
+                        android:background="@drawable/bg_video_control"
+                        android:contentDescription="Stream sound"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_sound"
+                        android:visibility="gone"
+                        tools:visibility="visible"/>
+
+                <ImageView
+                        android:id="@+id/video_record_button"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_margin="4dp"
+                        android:padding="8dp"
+                        android:background="@drawable/bg_video_control"
+                        android:contentDescription="Record the picture"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_record"
+                        android:visibility="gone"
+                        tools:visibility="visible"/>
+
+            </com.google.android.flexbox.FlexboxLayout>
 
         </FrameLayout>
 

@@ -359,10 +359,14 @@ private fun readH265(r: Bits): Sps {
         r.ue()
         r.bit()
     }
+    // st_ref_pic_set(i) for each; in an SPS a predicted set leans on the one
+    // before, reading a flag or two for each of its pictures. Counted as HM,
+    // libavcodec and Android's own decoder count them — every entry used or
+    // kept — which the spec's text differs from only for an entry no encoder
+    // writes, one landing on the current picture itself.
     val sets = r.ue()
     val deltaPocs = IntArray(sets)
     for (i in 0 until sets) {
-        // st_ref_pic_set(i); in an SPS a predicted set leans on the one before
         if (i != 0 && r.bit() == 1) {
             r.bit() // delta_rps_sign
             r.ue() // abs_delta_rps_minus1

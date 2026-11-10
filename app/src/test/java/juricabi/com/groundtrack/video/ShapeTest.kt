@@ -77,6 +77,35 @@ class ShapeTest {
         }
     }
 
+    /**
+     * The syntax no encoder at hand writes, built bit by bit and checked
+     * against ffmpeg: no VUI at all, picture order type 1, explicit scaling
+     * lists, field coding, monochrome and separate colour planes, emulation
+     * prevention made and moved, sub-layers, predicted reference sets,
+     * long-term pictures, PCM, full HRDs, the range extension — and the
+     * extensions this does not read, which are left as they came.
+     */
+    @Test
+    fun theRareSyntaxReadsThroughOrIsLeftAlone() {
+        val vectors = javaClass.classLoader!!.getResource("sps-vectors.txt")!!.readText().lines()
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+        assertEquals(19, vectors.size)
+        for (line in vectors) {
+            val (name, codecName, width, height, writable) = line.split(" ")
+            val codec = RtpCodec.valueOf(codecName)
+            val sps = hex(line.substringAfterLast(" "))
+            for (shape in shapes) {
+                val after = shapedSps(codec, sps, shape)
+                if (writable == "no") {
+                    assertArrayEquals(name, sps, after)
+                    continue
+                }
+                val shown = width.toInt() * pixelRatioOf(codec, after) / height.toInt()
+                assertEquals(name, shape.width / shape.height.toFloat(), shown, 0.002f)
+            }
+        }
+    }
+
     @Test
     fun aShapeAlreadySaidIsWrittenTheSameAgain() {
         // 720x480 at 8:9 is already 4:3

@@ -73,11 +73,11 @@ class FrskyStatusTextTest {
         val ear = Ear()
         val protocol = FrSkySportProtocol(ear)
         // forty-eight characters whose end word never came: the next
-        // message's first word runs past fifty, and starts afresh
+        // message's first word runs past fifty and starts afresh, marked
         val lost = ('A'..'Z').joinToString("") + ('a'..'v').joinToString("")
         words(lost, 6).dropLast(1).forEach { feed(protocol, frame(TEXT, it)) }
         words("Disarmed", 5).forEach { feed(protocol, frame(TEXT, it)) }
-        assertEquals(listOf("Disarmed" to 5), ear.said)
+        assertEquals(listOf("…Disarmed" to 5), ear.said)
     }
 
     @Test

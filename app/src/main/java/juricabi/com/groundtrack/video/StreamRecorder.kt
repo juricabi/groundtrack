@@ -320,6 +320,10 @@ class StreamRecorder(
                     // past what the shape can read, and the file keeps the
                     // stream's own shape — the log is where that shows
                     var keptOwnShape = false
+                    // the shape the run took at its keyframe: an SPS said
+                    // again mid-run must say the same, or a player decoding
+                    // it drops the picture until the next keyframe
+                    var runShape: Shape? = null
                     val unread = {
                         if (!keptOwnShape) DebugLog.note("Video", "record keeps the stream's own shape: its SPS could not be read through")
                         keptOwnShape = true
@@ -333,11 +337,14 @@ class StreamRecorder(
                                 }
                                 val t = clock.place(item.streamUs, item.arrivalUs, item.key) ?: return
                                 // the shape it was watched in goes in with its
-                                // SPS, in the frame or beside a keyframe
-                                val s = item.shape
+                                // SPS, in the frame or beside a keyframe — the
+                                // sets read as runs, for the encoder hands its
+                                // SPS and PPS over as one
+                                if (item.key) runShape = item.shape
+                                val s = runShape
                                 val data = if (s == null) item.data else shaped(item.codec, item.data, s, unread)
                                 val sets = if (s == null || !item.key) item.parameterSets
-                                    else item.parameterSets.map { shapedSps(item.codec, it, s, unread) }
+                                    else item.parameterSets.map { shaped(item.codec, annexB(it), s, unread) }
                                 muxer.frame(item.codec, data, t * 9 / 100, item.key, sets, clock.tookDiscontinuity())
                             }
                             is Sound -> {

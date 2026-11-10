@@ -467,8 +467,9 @@ class StreamRecorderTest {
                 now = i * 33_333L
                 val key = i % 30 == 0
                 // the encoder's way, the SPS beside the frames, and the
-                // stream's own, in the keyframe itself
-                val inline = if (key && i == 30) byteArrayOf(0, 0, 0, 1) + receiverSps else ByteArray(0)
+                // stream's own, in the keyframe itself — and said again
+                // mid-run, as some cameras say it before every frame
+                val inline = if (i == 30 || i == 55) byteArrayOf(0, 0, 0, 1) + receiverSps else ByteArray(0)
                 frame(
                     RtpCodec.H264, inline + byteArrayOf(0, 0, 0, 1, if (key) 0x65 else 0x41) + ByteArray(700),
                     i * 33_333L, key, listOf(receiverSps, byteArrayOf(0x68, 3))
@@ -477,11 +478,31 @@ class StreamRecorderTest {
                 if (i == 50) shape = Shape(4, 3)
             }
         }
+        // the run keeps the shape its keyframe took: a player meeting a
+        // changed SPS mid-run drops the picture to the next keyframe
         val said = shapesIn(file)
-        assertEquals(3, said.size)
+        assertEquals(4, said.size)
         assertEquals(16 / 9f, said[0], 0.002f)
         assertEquals(16 / 9f, said[1], 0.002f)
-        assertEquals(4 / 3f, said[2], 0.002f)
+        assertEquals(16 / 9f, said[2], 0.002f)
+        assertEquals(4 / 3f, said[3], 0.002f)
+    }
+
+    @Test
+    fun theEncodersSetsInOneBufferTakeTheShapeToo() {
+        // MediaCodec's codec config: SPS and PPS together, start codes and all
+        val config = byteArrayOf(0, 0, 0, 1) + receiverSps + byteArrayOf(0, 0, 0, 1, 0x68, 0xCE.toByte(), 0x38, 0x80.toByte())
+        val file = File(folder.root, "encoded.ts")
+        record(file, append = false, shape = { Shape(16, 9) }) {
+            now = 0
+            frame(RtpCodec.H264, byteArrayOf(0, 0, 0, 1, 0x65) + ByteArray(700), 0, true, listOf(config))
+        }
+        val said = shapesIn(file)
+        assertEquals(1, said.size)
+        assertEquals(16 / 9f, said[0], 0.002f)
+        // and the PPS beside it goes in as it came
+        val video = pes(packets(file.readBytes())).first()
+        assertTrue(video.toList().windowed(4).any { it == listOf<Byte>(0x68, 0xCE.toByte(), 0x38, 0x80.toByte()) })
     }
 
     @Test

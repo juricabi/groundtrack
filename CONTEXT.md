@@ -22,8 +22,8 @@ issues and reviews use these terms as written here.
   `onStatusText(message, severity)` on the bus, severity MAVLink's 0-7.
   A link that sends a message in pieces has it joined where the link is read
   — MAVLink 2's chunks in `MAVLink2Protocol`, ArduPilot's four-character
-  S.Port words in `FrSkySportProtocol` — so it reaches the decoder, the CSV
-  and a replay whole. `statusTextOf` (`decoder/DataDecoder.kt`) cuts one the
+  S.Port words in `FrSkySportProtocol` — so it reaches the screen and a
+  replay whole. `statusTextOf` (`decoder/DataDecoder.kt`) cuts one the
   same way for every link. A flight's are `MessageRows` (`service/FlightMessages.kt`), a repeat
   within a burst folded into its row; the live flight's are `FlightMessages`,
   kept by the process and fed by DataService before any ear hears them, and

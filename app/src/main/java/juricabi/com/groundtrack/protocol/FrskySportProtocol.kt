@@ -541,10 +541,10 @@ class FrSkySportProtocol : Protocol {
     // equal to the one before it is a copy — there is no other telling, and
     // two like words in a row inside one message lose the second, as they do
     // on the radio's own screen. Gathered here, where the link is read, so
-    // the screen, the CSV and a replay all have the message whole. No more
-    // than fifty characters of a text ever travel this way: past them, one
-    // message lost its end word and the next ran into it, and only the word
-    // that ran over — the newer message's — is kept.
+    // the screen and a replay both have the message whole. No more than fifty
+    // characters of a text ever travel this way: past them, one message lost
+    // its end word and the next ran into it. The newer message goes on from
+    // the word that ran over, "…" standing for what came before it.
     private var lastTextWord: Int? = null
     private val text = StringBuilder()
 
@@ -565,7 +565,7 @@ class FrSkySportProtocol : Protocol {
             }
             text.append(c.toChar())
         }
-        if (text.length > TEXT_LENGTH) text.delete(0, text.length - 4)
+        if (text.length > TEXT_LENGTH) text.replace(0, text.length - 4, "…")
     }
 
     private fun checksumIsValud() : Boolean {

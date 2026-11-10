@@ -154,17 +154,20 @@ class MAVLink2Protocol : Protocol {
 
     // A message longer than fifty characters, in chunks of fifty under one id,
     // numbered from 0, the last the one with a NUL in it — PX4 and ArduPilot
-    // both send them so. Joined here, where the link is read, so the screen,
-    // the CSV and a replay all have the message whole, its bytes joined before
-    // they are read, as a character can straddle two chunks.
+    // both send them so. Joined here, where the link is read, so the screen
+    // and a replay both have the message whole, its bytes joined before they
+    // are read, as a character can straddle two chunks.
     //
-    // Nothing is held back for good. Another long message begun sends on what
-    // was gathered; a piece lost on the way stands as "…" in its place; and
-    // PX4 ends a text of exactly fifty or a hundred characters with no NUL at
-    // all, so one not ended within fifty of the link's other packets — counted,
-    // not timed, so a replay joins it where the flight did — goes on as it is.
-    // A chunk come again, of this message or the one just sent, is dropped.
-    // The severity is the first chunk's: every chunk carries the same.
+    // Nothing waits on a piece that will not come. Another long message begun
+    // sends on what was gathered; a piece lost on the way stands as "…" in its
+    // place; and PX4 ends a text of exactly fifty or a hundred characters with
+    // no NUL at all, so one not ended within fifty of the link's other packets
+    // — counted, not timed, so a replay joins it where the flight did — goes on
+    // as it is, and a replay sends on what its log ends with ([end]). A chunk
+    // come again within those fifty packets is a copy and dropped; past them
+    // the id is forgotten, since both firmwares count their ids afresh from
+    // each boot and a link can outlive one. The severity is the first chunk's:
+    // every chunk carries the same.
     private var chunkId = 0
     private var nextChunk = 0
     private var chunkSeverity = 0
@@ -203,6 +206,8 @@ class MAVLink2Protocol : Protocol {
         nextChunk = Int.MAX_VALUE
     }
 
+    override fun end() = sendChunks()
+
     /** One whole message, in the form every link's status text takes: severity, words, NUL. */
     private fun say(severity: Int, words: ByteArray) {
         if (words.isEmpty()) return
@@ -212,7 +217,10 @@ class MAVLink2Protocol : Protocol {
     }
 
     private fun processPacket() {
-        if (chunks.size() > 0 && ++sinceChunk > CHUNK_PATIENCE) sendChunks()
+        if (chunkId != 0 && ++sinceChunk > CHUNK_PATIENCE) {
+            sendChunks()
+            chunkId = 0
+        }
         val byteBuffer = ByteBuffer.wrap(buffer.copyOf(255).map { it.toByte() }.toByteArray())
             .order(ByteOrder.LITTLE_ENDIAN)
         if (messageId == MAV_PACKET_STATUS_ID) {

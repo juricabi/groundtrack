@@ -73,7 +73,6 @@ class VideoPane(
     private val videoDivider: View = activity.findViewById(R.id.video_divider)
     private val videoView: SurfaceView = activity.findViewById(R.id.video_view)
     private val videoHalf: FrameLayout = activity.findViewById(R.id.video_half)
-    private val videoControls: LinearLayout = activity.findViewById(R.id.video_controls)
     private val videoWaiting: TextViewOutline = activity.findViewById(R.id.video_waiting)
     private val videoBlank: View = activity.findViewById(R.id.video_blank)
     private val flightPane: LinearLayout = activity.findViewById(R.id.flight_pane)
@@ -443,9 +442,6 @@ class VideoPane(
             activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         flightPane.orientation =
             if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-        // the half is tall beside the map and wide above it
-        videoControls.orientation =
-            if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         val match = LinearLayout.LayoutParams.MATCH_PARENT
         // coerced here too, so a split saved under looser old bounds obeys
         val share = preferenceManager.getVideoSplit(landscape).coerceIn(0.3f, 0.5f)

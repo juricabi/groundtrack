@@ -124,6 +124,32 @@ class StatusTextTest {
     }
 
     @Test
+    fun aRebootCountingItsIdsAfreshIsHeard() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        // ArduPilot numbers its first long text of every boot 1
+        val first = "PreArm: Check fence: Polygon boundary invalid, redraw it now"
+        first.chunked(50).forEachIndexed { k, part -> feed(protocol, chunk(4, part, id = 1, seq = k)) }
+        // the battery swapped, the link on the ground kept up throughout
+        repeat(60) { feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9))) }
+        val next = "EKF3 IMU0 MAG0 ground mag anomaly, yaw re-aligned after takeoff"
+        next.chunked(50).forEachIndexed { k, part -> feed(protocol, chunk(4, part, id = 1, seq = k)) }
+        assertEquals(listOf(first to 4, next to 4), ear.said)
+    }
+
+    @Test
+    fun whatIsStillGatheredGoesOnWhenTheStreamEnds() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        // PX4's exactly fifty, and then the log ends
+        feed(protocol, chunk(2, "Failsafe enabled: no datalink, activating Return!!", id = 7, seq = 0))
+        repeat(20) { feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9))) }
+        assertEquals(emptyList<Pair<String, Int>>(), ear.said)
+        protocol.end()
+        assertEquals(listOf("Failsafe enabled: no datalink, activating Return!!" to 2), ear.said)
+    }
+
+    @Test
     fun aChunkLostOnTheLinkSendsOnWhatCame() {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)

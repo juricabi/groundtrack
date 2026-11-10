@@ -1,4 +1,4 @@
-"""Fly a make-believe quad, in CRSF or MAVLink, at a real place.
+"""Fly a make-believe quad, in CRSF, MAVLink or S.Port, at a real place.
 
 Sends the frames a Crossfire link carries to a phone running the telemetry
 app: position, attitude, battery, link statistics, flight mode and the
@@ -10,7 +10,7 @@ terrain view with the model at its true attitude.
 
 The app listens: Connect -> Network -> TBS Crossfire / Tracer (UDP), same port.
 
-Two additions ride on the same flight model:
+Three additions ride on the same flight model:
 
     --passthrough          weave ArduPilot passthrough words (0x80 frames,
                            appids 0x5001-0x5006 plus status text) into the
@@ -381,14 +381,13 @@ STATUSTEXT_CRC_EXTRA = 83
 def statustext_payloads(severity, text, text_id, version):
     """STATUSTEXT as a link sends it: one message, or, longer than fifty
     characters on MAVLink 2, fifty-character chunks under one id as PX4 sends
-    them, the last with a NUL in it. MAVLink 1 has no chunks: cut at fifty."""
+    them, the last with a NUL in it unless the text fills it whole — then
+    nothing marks the end at all. MAVLink 1 has no chunks: cut at fifty."""
     raw = text.encode("ascii")
     if version == 1 or len(raw) <= 50:
         body = struct.pack("<B50s", severity, raw[:50])
         return [body if version == 1 else body + struct.pack("<HB", 0, 0)]
     pieces = [raw[i:i + 50] for i in range(0, len(raw), 50)]
-    if len(pieces[-1]) == 50:
-        pieces.append(b"")  # a whole number of chunks ends with an empty one
     return [struct.pack("<B50sHB", severity, piece, text_id, seq)
             for seq, piece in enumerate(pieces)]
 
@@ -586,12 +585,13 @@ def main():
     if (args.dump is None and args.host is None
             and not args.wait_enable and not args.tcp):
         parser.error("--host is required unless --dump or --tcp is given")
-    if args.above_launch and args.protocol == "mavlink-hl":
+    if args.above_launch and args.protocol != "crsf":
         # the printout used to promise relative heights the wire never
         # carried: HIGH_LATENCY2's altitude is sea level by specification,
-        # and this sim tells only lies that some firmware actually tells
-        parser.error("--above-launch models the CRSF estimator; "
-                     "HIGH_LATENCY2 always carries sea-level altitude")
+        # passthrough carries sea level and the height above home both, and
+        # this sim tells only lies that some firmware actually tells
+        parser.error("--above-launch models the CRSF estimator; HIGH_LATENCY2 "
+                     "and S.Port passthrough carry their heights as defined")
 
     route = None
     route_cache = None
@@ -859,11 +859,11 @@ def main():
             continue
 
         if args.protocol == "sport":
-            # One frame per poll, as the receiver asks the autopilot: FrSky's
-            # GPS sensor for the position, passthrough words for the rest,
-            # and while any text waits it takes the poll, a word four times
-            # over — the line every 5 s and the failed checks every 20 s, the
-            # same as --passthrough sends over CRSF.
+            # As ArduPilot answers a FrSky receiver: FrSky's GPS sensor for
+            # the position every 0.2 s, a passthrough word each tick, and
+            # while any text waits a word of it too, each word four times
+            # over — the line every 5 s and the failed checks every 20 s,
+            # the same as --passthrough sends over CRSF.
             if now - last["text"] >= 5.0:
                 last["text"] = now
                 for word in sport_text_words(6, "SimFlight passthrough alive"):

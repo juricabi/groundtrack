@@ -163,6 +163,9 @@ abstract class Protocol(val dataDecoder: DataDecoder) {
 
     abstract fun process(data: Int)
 
+    /** The stream is over: what is still held of a message goes on now. */
+    open fun end() {}
+
     protected fun processArmed(armed: Boolean) {
         this.armed = armed;
         this.processDistance()
