@@ -60,6 +60,8 @@ internal fun shapedSps(codec: RtpCodec, nal: ByteArray, shape: Shape, unread: ()
             if (codec == RtpCodec.H264) restOfH264Vui(read) else restOfH265Vui(read, sps.subLayers)
         }
         if (codec == RtpCodec.H265 && !h265Extensions(read) || read.at != stop) return nal.also { unread() }
+        // a picture of no size has no shape to say
+        if (sps.width <= 0 || sps.height <= 0) return nal.also { unread() }
 
         // the ratio of the frame's own pixels that shows it in the shape
         var sarWidth = shape.width.toLong() * sps.height
@@ -364,18 +366,17 @@ private fun readH265(r: Bits): Sps {
     // libavcodec and Android's own decoder count them — every entry used or
     // kept — which the spec's text differs from only for an entry no encoder
     // writes, one landing on the current picture itself.
-    val sets = r.ue()
-    val deltaPocs = IntArray(sets)
-    for (i in 0 until sets) {
+    var pictures = 0 // the set before's
+    repeat(r.ue()) { i ->
         if (i != 0 && r.bit() == 1) {
             r.bit() // delta_rps_sign
             r.ue() // abs_delta_rps_minus1
             var count = 0
-            for (j in 0..deltaPocs[i - 1]) {
+            repeat(pictures + 1) {
                 val used = r.bit() == 1
                 if (used || r.bit() == 1) count++
             }
-            deltaPocs[i] = count
+            pictures = count
         } else {
             val negative = r.ue()
             val positive = r.ue()
@@ -383,7 +384,7 @@ private fun readH265(r: Bits): Sps {
                 r.ue()
                 r.bit()
             }
-            deltaPocs[i] = negative + positive
+            pictures = negative + positive
         }
     }
     if (r.bit() == 1) {
