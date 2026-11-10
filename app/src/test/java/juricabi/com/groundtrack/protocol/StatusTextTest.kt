@@ -68,6 +68,32 @@ class StatusTextTest {
     }
 
     @Test
+    fun theRadiosOwnPacketBetweenThePiecesSplitsNothing() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        val long = "Preflight Fail: Accel Sensor 0 missing - check the IMU wiring and power, then reboot"
+        val (first, rest) = long.chunked(50)
+        feed(protocol, chunk(3, first, id = 0, seq = 0))
+        // a SiK radio slips its own RADIO_STATUS in, as system 51
+        feed(protocol, mav2Frame(RADIO_STATUS, ByteArray(9), system = 51, component = 68))
+        feed(protocol, chunk(3, rest, id = 0, seq = 1))
+        assertEquals(listOf(long to 3), ear.said)
+    }
+
+    @Test
+    fun twoSendersTextsNeverCutEachOtherShort() {
+        val ear = Ear()
+        val protocol = MAVLink2Protocol(ear)
+        // the autopilot gathering a long text, a companion computer's own
+        // exactly-fifty text arriving between its pieces
+        feed(protocol, chunk(6, "b".repeat(50), id = 7, seq = 0))
+        feed(protocol, chunk(5, "a".repeat(50), id = 0, seq = 0, system = 2))
+        feed(protocol, chunk(6, "tail", id = 7, seq = 1))
+        feed(protocol, mav2Frame(HEARTBEAT, ByteArray(9), system = 2))
+        assertEquals(listOf("b".repeat(50) + "tail" to 6, "a".repeat(50) to 5), ear.said)
+    }
+
+    @Test
     fun twoUnnumberedFullTextsInARowAreTwo() {
         val ear = Ear()
         val protocol = MAVLink2Protocol(ear)
@@ -79,10 +105,11 @@ class StatusTextTest {
         assertEquals(listOf(first to 4, second to 4, "Armed" to 6), ear.said)
     }
 
-    private fun chunk(severity: Int, words: String, id: Int, seq: Int) = chunk(severity, words.toByteArray(), id, seq)
+    private fun chunk(severity: Int, words: String, id: Int, seq: Int, system: Int = 1) =
+        chunk(severity, words.toByteArray(), id, seq, system)
 
-    private fun chunk(severity: Int, words: ByteArray, id: Int, seq: Int) =
-        mav2Frame(STATUSTEXT, text(severity, words) + byteArrayOf(id.toByte(), (id shr 8).toByte(), seq.toByte()))
+    private fun chunk(severity: Int, words: ByteArray, id: Int, seq: Int, system: Int = 1) =
+        mav2Frame(STATUSTEXT, text(severity, words) + byteArrayOf(id.toByte(), (id shr 8).toByte(), seq.toByte()), system)
 
     @Test
     fun aLongMessageInChunksArrivesWhole() {
@@ -199,9 +226,9 @@ class StatusTextTest {
         return byteArrayOf(0xFE.toByte()) + header + payload + checksum(header, payload, messageId)
     }
 
-    private fun mav2Frame(messageId: Int, payload: ByteArray): ByteArray {
+    private fun mav2Frame(messageId: Int, payload: ByteArray, system: Int = 1, component: Int = 1): ByteArray {
         val header = byteArrayOf(
-            payload.size.toByte(), 0, 0, 0, 1, 1,
+            payload.size.toByte(), 0, 0, 0, system.toByte(), component.toByte(),
             messageId.toByte(), (messageId shr 8).toByte(), (messageId shr 16).toByte()
         )
         return byteArrayOf(0xFD.toByte()) + header + payload + checksum(header, payload, messageId)
@@ -218,5 +245,6 @@ class StatusTextTest {
     private companion object {
         const val STATUSTEXT = 253
         const val HEARTBEAT = 0
+        const val RADIO_STATUS = 109
     }
 }

@@ -234,7 +234,7 @@ class StreamRecorder(
         val parameterSets: List<ByteArray>, val arrivalUs: Long,
         /** Frames were dropped just before this one; the timeline resumes at a keyframe. */
         val afterGap: Boolean,
-        /** A keyframe's shape, which its run's SPS take; null on the frames after it. */
+        /** A keyframe's shape, which every SPS up to the next keyframe takes; null on the frames between. */
         val shape: Shape?
     ) : Item(data)
 

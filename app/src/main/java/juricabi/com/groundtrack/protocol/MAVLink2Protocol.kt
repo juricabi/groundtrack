@@ -158,31 +158,40 @@ class MAVLink2Protocol : Protocol {
     // numbered from 0, the last the one with a NUL in it — PX4 and ArduPilot
     // both send them so. Joined here, where the link is read, so the screen
     // and a replay both have the message whole, its bytes joined before they
-    // are read, as a character can straddle two chunks.
+    // are read, as a character can straddle two chunks. Each sender — a
+    // system and component — has its own in hand: the autopilot, a companion
+    // computer and the radio's own packets share a link, and one's never cuts
+    // another's short.
     //
     // Nothing waits on a piece that will not come. Another long message begun
-    // sends on what was gathered; a piece lost on the way stands as "…" in its
-    // place; and PX4 ends a text of exactly fifty or a hundred characters with
-    // no NUL at all, so one not ended within fifty of the link's other packets
-    // goes on as it is — counted, not timed, so a replay joins it as the
-    // flight did. Only a reconnect parts them: the new link starts afresh,
-    // while its log goes on in the same file, and there a piece the old link
-    // was holding runs into what follows. A chunk come again within those
-    // fifty packets is a copy and dropped; past them the id is forgotten,
-    // since both firmwares count their ids afresh from each boot and a link
-    // can outlive one. The severity is the first chunk's: every chunk carries
-    // the same.
+    // sends on what was gathered; a piece lost between others stands as "…" in
+    // its place; and PX4 ends a text of exactly fifty or a hundred characters
+    // with no NUL at all, so one not ended within fifty of the link's other
+    // packets goes on as it is — counted, not timed, so a replay joins it as
+    // the flight did. Two things part them, both on the log's side: a
+    // connection's first packets, read to tell its protocol, are never
+    // decoded live; and a reconnect starts afresh while its log goes on in the
+    // same file, where the replay sends on a piece the old link was holding
+    // and dropped with it. A chunk come again within those fifty packets is a
+    // copy and dropped; past them the id is forgotten, since both firmwares
+    // count their ids afresh from each boot and a link can outlive one. The
+    // severity is the first chunk's: every chunk carries the same.
     //
     // Id 0 is a text in one piece — but PX4 numbers its first text of a boot
     // 0 as well, long or not. So a piece under id 0 with no NUL in it, which
     // ArduPilot sends for a text of exactly fifty, is held under a key of its
-    // own until the next packet says whether a second piece follows: PX4
-    // sends a text's pieces back to back.
-    private var chunkId = 0
-    private var nextChunk = 0
-    private var chunkSeverity = 0
-    private var sinceChunk = 0
-    private val chunks = java.io.ByteArrayOutputStream()
+    // own until its sender's next packet says whether a second piece follows:
+    // PX4 sends a text's pieces back to back.
+    private class Held {
+        var id = 0
+        var next = 0
+        var severity = 0
+        var since = 0
+        val bytes = java.io.ByteArrayOutputStream()
+    }
+
+    /** What each sender has in hand, by system and component. */
+    private val held = LinkedHashMap<Int, Held>()
 
     private fun statusText(payload: ByteArray) {
         val severity = payload[0].toInt() and 0xFF
@@ -191,38 +200,42 @@ class MAVLink2Protocol : Protocol {
         val words = payload.copyOfRange(1, end)
         val id = (payload[TEXT_LENGTH + 1].toInt() and 0xFF) or ((payload[TEXT_LENGTH + 2].toInt() and 0xFF) shl 8)
         val seq = payload[TEXT_LENGTH + 3].toInt() and 0xFF
+        val from = held.getOrPut(sender()) { Held() }
         if (id == 0 && seq == 0 && end <= TEXT_LENGTH) {
-            // the only piece there is; one held unnumbered ends here
-            if (chunkId == UNNUMBERED) forget()
+            // the only piece there is; one this sender held unnumbered ends here
+            if (from.id == UNNUMBERED) forget(from)
             say(severity, words)
             return
         }
         val key = if (id == 0) UNNUMBERED else id
         // an unnumbered first piece is always a text of its own
-        if (key != chunkId || key == UNNUMBERED && seq == 0) {
-            sendChunks()
-            chunkId = key
-            chunkSeverity = severity
-            nextChunk = 0
+        if (key != from.id || key == UNNUMBERED && seq == 0) {
+            send(from)
+            from.id = key
+            from.severity = severity
+            from.next = 0
         }
-        if (seq < nextChunk) return
-        if (seq > nextChunk) chunks.write(GAP)
-        chunks.write(words)
-        nextChunk = seq + 1
-        sinceChunk = 0
-        if (end <= TEXT_LENGTH) sendChunks()
+        if (seq < from.next) return
+        if (seq > from.next) from.bytes.write(GAP)
+        from.bytes.write(words)
+        from.next = seq + 1
+        from.since = 0
+        if (end <= TEXT_LENGTH) send(from)
     }
 
-    private fun sendChunks() {
-        if (chunks.size() > 0) say(chunkSeverity, chunks.toByteArray())
-        chunks.reset()
-        nextChunk = Int.MAX_VALUE
+    private fun sender() = systemId shl 8 or componentId
+
+    /** Sends on what [held] has gathered, keeping its id to know a copy by. */
+    private fun send(held: Held) {
+        if (held.bytes.size() > 0) say(held.severity, held.bytes.toByteArray())
+        held.bytes.reset()
+        held.next = Int.MAX_VALUE
     }
 
     /** Sends on what is held and lets its id go. */
-    private fun forget() {
-        sendChunks()
-        chunkId = 0
+    private fun forget(held: Held) {
+        send(held)
+        held.id = 0
     }
 
     /** One whole message, in the form every link's status text takes: severity, words, NUL. */
@@ -234,9 +247,11 @@ class MAVLink2Protocol : Protocol {
     }
 
     private fun processPacket() {
-        if (chunkId == UNNUMBERED && messageId != MAV_PACKET_STATUSTEXT_ID ||
-            chunkId != 0 && ++sinceChunk > CHUNK_PATIENCE
-        ) forget()
+        for ((who, h) in held) {
+            if (h.id == UNNUMBERED && who == sender() && messageId != MAV_PACKET_STATUSTEXT_ID ||
+                h.id != 0 && ++h.since > CHUNK_PATIENCE
+            ) forget(h)
+        }
         val byteBuffer = ByteBuffer.wrap(buffer.copyOf(255).map { it.toByte() }.toByteArray())
             .order(ByteOrder.LITTLE_ENDIAN)
         if (messageId == MAV_PACKET_STATUS_ID) {

@@ -160,11 +160,11 @@ flat battery keeps everything up to the last second. Rotations and dropouts
 continue the same file. The picture goes in as the camera sent it, never
 turned, and in the shape it is watched in — said in the stream for players to
 show it so, from the next keyframe after a change (players built on ExoPlayer,
-as many gallery apps are, keep the shape a recording began in; choose it
-before recording). With the sound on, its sound goes in too (USB and RTSP, the
-sources that carry any), as AAC, and once a recording has sound it keeps it to
-the end — silent where the sound was off. A recording stops itself when
-storage runs low.
+as many gallery apps are, keep the shape a recording began with, and hear its
+sound only if it was on as it began: choose both before recording). With the
+sound on, its sound goes in too (USB and RTSP, the sources that carry any), as
+AAC, and once a recording has sound it keeps it to the end — silent where the
+sound was off. A recording stops itself when storage runs low.
 
 To try `udp://` with no hardware, send a test pattern from a PC on the same
 Wi-Fi, or from Termux on the phone to `127.0.0.1`:
